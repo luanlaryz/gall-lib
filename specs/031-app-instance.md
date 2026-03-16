@@ -360,6 +360,7 @@ Exemplos normativos:
 - se um agent factory fornecer `Memory` proprio, ele prevalece sobre `Defaults.Agent.Memory`
 - se um workflow factory nao fornecer `Retry`, ele herda `Defaults.Workflow.Retry`
 - se nenhum logger for fornecido, o `App` usa `logger.Nop()`
+- se nenhum `Defaults.Agent.Engine` for fornecido, o `App` injeta o engine interno padrao apenas para factories; instancias prontas registradas por `Register` continuam imutaveis
 
 ### 6.3 Regras de merge
 
@@ -373,6 +374,7 @@ Exemplos normativos:
 - defaults globais sao congelados ao final de `New`
 - factories enxergam o snapshot de defaults congelado no momento de `Start`
 - defaults nao podem mudar depois que o runtime entra em `StateRunning`
+- o built-in de `ShutdownTimeout` na primeira versao funcional e `30s`
 
 ## 7. Integracao com logger
 

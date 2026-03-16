@@ -89,8 +89,29 @@ func New(cfg Config, opts ...Option) (*Agent, error)
 
 func (a *Agent) ID() string
 func (a *Agent) Name() string
+func (a *Agent) Descriptor() Descriptor
+func (a *Agent) Definition() Definition
 func (a *Agent) Run(ctx context.Context, req Request) (Response, error)
 func (a *Agent) Stream(ctx context.Context, req Request) (Stream, error)
+
+type Descriptor struct {
+    Name string
+    ID   string
+}
+
+type Definition struct {
+    Descriptor       Descriptor
+    Instructions     string
+    Model            Model
+    MaxSteps         int
+    Tools            []tool.Tool
+    Memory           memory.Store
+    WorkingMemory    memory.WorkingMemoryFactory
+    InputGuardrails  []guardrail.Input
+    OutputGuardrails []guardrail.Output
+    Hooks            []Hook
+    Metadata         types.Metadata
+}
 
 type Request struct {
     RunID        string
@@ -222,6 +243,46 @@ type ModelStream interface {
     Recv() (ModelEvent, error)
     Close() error
 }
+
+type ToolSpec struct {
+    Name        string
+    Description string
+}
+
+type ModelToolCall struct {
+    ID    string
+    Name  string
+    Input map[string]any
+}
+
+type ModelRequest struct {
+    AgentID      string
+    RunID        string
+    SessionID    string
+    Instructions string
+    Messages     []types.Message
+    Memory       memory.Snapshot
+    Metadata     types.Metadata
+    MaxSteps     int
+    ToolChoice   ToolChoice
+    AllowedTools []string
+    Tools        []ToolSpec
+}
+
+type ModelResponse struct {
+    Message   types.Message
+    Usage     types.Usage
+    ToolCalls []ModelToolCall
+    Metadata  types.Metadata
+}
+
+type ModelEvent struct {
+    Delta    *types.MessageDelta
+    Message  *types.Message
+    ToolCall *ModelToolCall
+    Usage    types.Usage
+    Done     bool
+}
 ```
 
 ```go
@@ -276,6 +337,7 @@ type Output interface {
 
 - `Agent` deve ser imutavel apos `New`.
 - `Run` e `Stream` devem ser seguros para concorrencia no mesmo `Agent`.
+- `Definition()` e um snapshot somente-leitura para runtimes e composicao avancada; ele nao deve permitir mutacao da configuracao do `Agent`.
 - `Request.Messages` deve aceitar ao menos roles `user`, `assistant` e `tool`.
 - `types.MessageDelta` deve suportar pelo menos delta textual e correlacao com o `RunID`.
 - `Response` de `Run` e `Response` carregado por `EventAgentCompleted` devem ser equivalentes para a mesma execucao.

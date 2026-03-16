@@ -23,11 +23,12 @@ O documento complementa a `Spec 000` e a `Spec 001` com tres funcoes praticas:
 - `P1`: paridade funcional principal apos a fundacao.
 - `P2`: expansao ou adaptador que nao deve bloquear a entrega da v1.
 
-### Status inicial
+### Status
 
-Os status iniciais desta matriz assumem o estado atual do repositorio:
+Os status usados nesta matriz sao:
 
 - `Nao iniciado`: feature reconhecida e ainda sem implementacao.
+- `Parcial`: existe primeira entrega funcional, mas sem cobrir todos os criterios de pronto da feature.
 - `Adiado`: feature conhecida, mas fora da v1 neste momento.
 
 ### Risco
@@ -40,30 +41,30 @@ Os status iniciais desta matriz assumem o estado atual do repositorio:
 
 | Feature | Descricao | Obrigatoria na v1? | Prioridade | Modulo provavel na gaal-lib | Status inicial | Risco | Observacoes de compatibilidade |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Application entrypoint | Bootstrap da aplicacao, composicao de registries, runtime e lifecycle. | Sim | P0 | `app` | Nao iniciado | Medio | Equivale ao ponto de entrada da app no Voltagent; em Go deve privilegiar `context.Context`, construtores e `Run`. |
-| Agent | Unidade principal de execucao com instrucoes, modelo, tools e estado associado. | Sim | P0 | `agent` | Nao iniciado | Alto | Equivale ao agente core; a API pode ser mais tipada que a original, desde que preserve o comportamento observavel. |
-| Agent registry | Registro e resolucao de agentes por nome ou id logico. | Sim | P0 | `registry/agent` | Nao iniciado | Medio | Deve manter lookup deterministico e erro explicito para duplicidade ou ausencia. |
-| Workflow registry | Registro e descoberta de workflows reutilizaveis. | Sim | P1 | `registry/workflow` | Nao iniciado | Baixo | Pode divergir na forma da API, mas precisa preservar a semantica de cadastro e resolucao. |
-| Tool | Contrato de ferramenta invocavel pelo runtime do agente. | Sim | P0 | `tool` | Nao iniciado | Medio | Equivale ao contrato de tool do Voltagent; validacao de input e erro precisam ser observaveis. |
+| Application entrypoint | Bootstrap da aplicacao, composicao de registries, runtime e lifecycle. | Sim | P0 | `app` | Parcial | Medio | Primeira versao funcional entregue com registries, defaults, lifecycle e graceful shutdown basico; rollback e serverless continuam minimos. |
+| Agent | Unidade principal de execucao com instrucoes, modelo, tools e estado associado. | Sim | P0 | `agent` | Parcial | Alto | Primeira versao funcional entregue com `Run`, `Stream` basico, tool loop sequencial, cancelamento e erros classificados; streaming incremental de modelo continua dependente de evolucao posterior. |
+| Agent registry | Registro e resolucao de agentes por nome ou id logico. | Sim | P0 | `registry/agent` | Parcial | Medio | Cadastro, duplicidade, factories e lookup deterministico ja existem no `App`; ainda faltam suites de conformidade mais amplas. |
+| Workflow registry | Registro e descoberta de workflows reutilizaveis. | Sim | P1 | `registry/workflow` | Parcial | Baixo | Registro e resolucao minimos existem no `App`; execucao de workflow continua fora desta etapa. |
+| Tool | Contrato de ferramenta invocavel pelo runtime do agente. | Sim | P0 | `tool` | Parcial | Medio | Contrato publico e loop sequencial basico ja existem; schema rico e toolkits continuam para etapas futuras. |
 | Toolkit | Agrupamento e distribuicao de um conjunto coerente de tools. | Sim | P1 | `toolkit` | Nao iniciado | Baixo | Pode ser traduzido para colecoes idiomaticas de Go sem perder a semantica de composicao. |
 | Reasoning tools | Conjunto de tools auxiliares para raciocinio estruturado e etapas intermediarias. | Nao | P2 | `tool/reasoning` | Adiado | Medio | A v1 deve suportar tools genericas; built-ins especializados de reasoning podem vir depois. |
-| Memory | Abstracao de memoria de mais longa duracao ou compartilhada entre execucoes. | Sim | P1 | `memory` | Nao iniciado | Alto | A compatibilidade depende de definir fronteiras claras entre memoria, sessao e persistencia. |
-| Working memory | Estado temporario de execucao para uma conversa, turno ou workflow. | Sim | P1 | `memory/working` | Nao iniciado | Medio | Deve ser escopada por execucao e respeitar cancelamento e concorrencia idiomatica em Go. |
+| Memory | Abstracao de memoria de mais longa duracao ou compartilhada entre execucoes. | Sim | P1 | `memory` | Parcial | Alto | Contratos publicos e integracao plugavel no runtime do agent existem; backends concretos e suites de paridade ainda faltam. |
+| Working memory | Estado temporario de execucao para uma conversa, turno ou workflow. | Sim | P1 | `memory/working` | Parcial | Medio | Working memory efemera por run ja existe no core runtime; customizacao avancada e cobertura de workflow continuam pendentes. |
 | Conversation persistence | Persistencia de historico e contexto conversacional entre execucoes. | Sim | P1 | `persistence/conversation` | Nao iniciado | Alto | V1 deve limitar-se a persistencia local ou plugavel, sem dependencia de plataforma hospedada. |
-| Guardrails de input | Validacao, bloqueio ou saneamento antes da execucao principal. | Sim | P1 | `guardrail` | Nao iniciado | Medio | Precisa preservar ordem de execucao e semantica de falha antes do agente ou workflow. |
-| Guardrails de output | Validacao, bloqueio ou transformacao antes da resposta final. | Sim | P1 | `guardrail` | Nao iniciado | Medio | A compatibilidade deve cobrir sucesso, bloqueio e erro pos-execucao. |
+| Guardrails de input | Validacao, bloqueio ou saneamento antes da execucao principal. | Sim | P1 | `guardrail` | Parcial | Medio | Ordem, allow, block e transform basicos ja existem no agent runtime; guardrails de streaming e maior riqueza semantica seguem pendentes. |
+| Guardrails de output | Validacao, bloqueio ou transformacao antes da resposta final. | Sim | P1 | `guardrail` | Parcial | Medio | Transformacao e bloqueio basicos ja existem antes da persistencia; suites de paridade completas ainda faltam. |
 | Guardrails de streaming | Interceptacao e controle de eventos parciais durante streaming. | Nao | P2 | `guardrail/stream` | Adiado | Alto | Streaming aumenta a complexidade de paridade e nao deve bloquear a v1. |
 | Workflow chain | Encadeamento sequencial de etapas com passagem de contexto e resultados. | Sim | P0 | `workflow` | Nao iniciado | Medio | Equivale ao fluxo sequencial do core; ordem de etapas e propagacao de erro devem ser identicas. |
 | Workflow branching | Desvio condicional entre caminhos alternativos de workflow. | Sim | P1 | `workflow` | Nao iniciado | Medio | A API pode usar funcoes ou structs, mas a decisao e as transicoes precisam ser testaveis. |
 | Workflow retry | Politica de repeticao para etapas falhas com limites e estrategia. | Sim | P1 | `workflow/retry` | Nao iniciado | Medio | Deve definir semantica de erro, backoff e idempotencia esperada. |
 | Workflow hooks | Hooks locais antes, durante e depois da execucao de workflows. | Sim | P1 | `workflow/hooks` | Nao iniciado | Medio | Pode absorver parte da extensibilidade do Voltagent sem introduzir sistema de plugins completo. |
 | Workflow execution history | Registro observavel das transicoes, etapas e resultados do workflow. | Sim | P1 | `workflow/history` | Nao iniciado | Medio | Deve ser local e consultavel para auditoria, sem virar observabilidade hospedada. |
-| Logger | Logging do runtime e das operacoes principais. | Sim | P0 | `logging` | Nao iniciado | Baixo | Em Go, a integracao natural e com `slog`, preservando eventos e niveis relevantes. |
-| Observability hooks locais | Hooks para metricas, tracing local e eventos de instrumentacao. | Sim | P1 | `observability` | Nao iniciado | Medio | Em escopo apenas como hooks locais ou integraveis; nao inclui backend SaaS. |
+| Logger | Logging do runtime e das operacoes principais. | Sim | P0 | `logging` | Parcial | Baixo | Fachada minima sobre `slog` e `logger.Nop()` ja existem; instrumentacao mais rica segue para etapas futuras. |
+| Observability hooks locais | Hooks para metricas, tracing local e eventos de instrumentacao. | Sim | P1 | `observability` | Parcial | Medio | Hooks locais de `agent` e `app` ja existem com recuperacao de panic; integracoes adicionais continuam fora desta etapa. |
 | HTTP server abstraction | Adaptador para expor runtime por HTTP sem acoplar a um framework especifico. | Nao | P2 | `adapter/http` | Adiado | Medio | Nao faz parte do nucleo minimo; so deve entrar apos estabilizacao do runtime central. |
 | Serverless abstraction | Adaptador para empacotar runtime em ambientes serverless. | Nao | P2 | `adapter/serverless` | Adiado | Alto | Risco alto de acoplamento com plataforma e de escopo de deploy, portanto fora da v1. |
 | Triggers/extensibility | Pontos de extensao para acionar agentes ou workflows a partir de eventos externos. | Nao | P2 | `trigger` | Adiado | Alto | Na v1, hooks e APIs explicitas devem bastar; um subsistema de triggers fica para depois. |
-| Graceful shutdown | Encerramento ordenado com flush de estado, hooks finais e cancelamento cooperativo. | Sim | P1 | `lifecycle` | Nao iniciado | Medio | Precisa ser orientado por `context.Context` e compativel com runtime local, nao com control plane remoto. |
+| Graceful shutdown | Encerramento ordenado com flush de estado, hooks finais e cancelamento cooperativo. | Sim | P1 | `lifecycle` | Parcial | Medio | `Shutdown` cooperativo e idempotente ja existe no `App`; cobertura de cenarios de rollback e servidores long-lived ainda pode crescer. |
 
 ## 4. Lacunas e riscos
 
