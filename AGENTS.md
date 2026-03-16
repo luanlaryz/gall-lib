@@ -98,3 +98,28 @@
 - Explicar gaps restantes, limitacoes conhecidas e o que ficou fora da entrega.
 - Se a tarefa nao puder ser implementada por falta de spec, dizer isso explicitamente e apontar o gap de especificacao.
 - Se houver divergencia intencional em relacao ao Voltagent, apontar a spec ou item da feature matrix que autoriza a diferenca.
+
+
+## Skill mapping
+
+- Sempre começar por índice de skills: [`skills/00-skill-index/SKILL.md`](skills/00-skill-index/SKILL.md).
+- Arquitetura/dependências/pastas: [`skills/01-hexagonal-architecture/SKILL.md`](skills/01-hexagonal-architecture/SKILL.md).
+- Tenant/auth/quota: [`skills/02-tenant-auth-quotas/SKILL.md`](skills/02-tenant-auth-quotas/SKILL.md).
+- ACK assíncrono/use cases de comando: [`skills/03-async-command-processing/SKILL.md`](skills/03-async-command-processing/SKILL.md).
+- SSE/WS/replay por `seq`: [`skills/04-streaming-sse-ws/SKILL.md`](skills/04-streaming-sse-ws/SKILL.md).
+- Engine de agentes/ADK/deltas: [`skills/05-adk-agent-core/SKILL.md`](skills/05-adk-agent-core/SKILL.md).
+- Roteamento de provider/model por seller: [`skills/06-multi-provider-model-routing/SKILL.md`](skills/06-multi-provider-model-routing/SKILL.md).
+- Postgres/pgx/migrations: [`skills/07-postgres-pgx-migrate/SKILL.md`](skills/07-postgres-pgx-migrate/SKILL.md).
+- Redis cache/streams/TTL: [`skills/08-redis-cache-streams/SKILL.md`](skills/08-redis-cache-streams/SKILL.md).
+- Worker/SQS FIFO/DLQ/idempotência: [`skills/09-sqs-fifo-idempotency/SKILL.md`](skills/09-sqs-fifo-idempotency/SKILL.md).
+- HTTP Gin/OpenAPI: [`skills/10-http-gin-openapi/SKILL.md`](skills/10-http-gin-openapi/SKILL.md).
+- gRPC/interceptors/health: [`skills/11-grpc-interceptors-health/SKILL.md`](skills/11-grpc-interceptors-health/SKILL.md).
+- Logs/traces/metrics: [`skills/12-observability-zap-otel-prom/SKILL.md`](skills/12-observability-zap-otel-prom/SKILL.md).
+- Padrões Go e concorrência segura: [`skills/13-go-idiomatic-effective-go/SKILL.md`](skills/13-go-idiomatic-effective-go/SKILL.md).
+- Config/flags com Viper: [`skills/14-config-viper-flags/SKILL.md`](skills/14-config-viper-flags/SKILL.md).
+- DevX/CI/pre-commit/changelog: [`skills/15-devx-ci-precommit-changelog/SKILL.md`](skills/15-devx-ci-precommit-changelog/SKILL.md).
+- Object Calisthenics (Go): [`skills/16-object-calisthenics/SKILL.md`](skills/16-object-calisthenics/SKILL.md).
+- SOLID em Go + ports/adapters: [`skills/17-solid-go-ports/SKILL.md`](skills/17-solid-go-ports/SKILL.md).
+- OWASP API Security + CI checks: [`skills/18-security-owasp-api/SKILL.md`](skills/18-security-owasp-api/SKILL.md).
+- Prompt Injection / LLM safety: [`skills/19-prompt-injection-llm-safety/SKILL.md`](skills/19-prompt-injection-llm-safety/SKILL.md).
+- Estratégia de testes/regressão/carga/containers: [`skills/20-testing-strategy-regression-load-containers/SKILL.md`](skills/20-testing-strategy-regression-load-containers/SKILL.md).
