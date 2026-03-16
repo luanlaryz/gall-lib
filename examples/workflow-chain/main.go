@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/luanlima/gaal-lib/pkg/app"
+	"github.com/luanlima/gaal-lib/pkg/logger"
 	"github.com/luanlima/gaal-lib/pkg/types"
 	"github.com/luanlima/gaal-lib/pkg/workflow"
 )
@@ -17,6 +18,7 @@ func main() {
 		app.Config{
 			Name: "workflow-chain",
 			Defaults: app.Defaults{
+				Logger: logger.Default(),
 				Workflow: app.WorkflowDefaults{
 					Metadata: types.Metadata{"example": "workflow-chain"},
 					History:  history,
@@ -33,6 +35,7 @@ func main() {
 	if err := instance.Start(ctx); err != nil {
 		panic(err)
 	}
+	ctx = instance.Context(ctx)
 	defer func() {
 		_ = instance.Shutdown(ctx)
 	}()

@@ -54,7 +54,7 @@ Nesta fase, os contratos normativos centrais continuam compativeis com `pkg/app`
 
 Observacao arquitetural:
 
-- `pkg/server` continua sendo o lugar natural para helpers e adapters publicos de transporte no futuro
+- `pkg/server` passa a poder oferecer helpers publicos aditivos para probes, invocacao curta e adapters de transporte sem mover os contratos centrais de `pkg/app`
 - esta spec nao exige mover os contratos ja existentes de `pkg/app`
 - qualquer evolucao para `pkg/server` deve preservar compatibilidade observavel com os nomes publicos ja adotados
 
@@ -170,7 +170,7 @@ Regras adicionais:
 
 1. `OnInvokeStart` pode enriquecer contexto de correlacao local, mas nao deve esconder cancelamento e deadline do contexto original.
 2. `OnInvokeDone` deve sempre ser chamado, mesmo em erro de negocio do alvo.
-3. O `App` nao executa `OnInvokeStart` e `OnInvokeDone` por conta propria; essa responsabilidade e do adaptador serverless.
+3. O adaptador serverless pode delegar essa sequencia a um helper publico de `App` ou `pkg/server`, desde que a ordem observavel seja preservada.
 4. `Target.Kind` e `Target.Name` devem identificar de forma observavel o alvo executado.
 
 ## 6. Ciclo start/stop
@@ -266,6 +266,11 @@ Durante graceful shutdown:
 2. o adapter deve parar de aceitar novas requisicoes ou novas mensagens de entrada
 3. operacoes inflight podem continuar ate terminar ou ate `ctx` expirar
 4. health pode permanecer "saudavel" enquanto o processo ainda estiver drenando com controle
+
+Observacao de implementacao:
+
+- `App.Health()` e `App.Ready()` podem expor essa semantica diretamente para adapters locais
+- `pkg/server` pode oferecer helpers como snapshots de probe sem introduzir dependencia em HTTP
 
 ## 8. Integracao com registry de agents e workflows
 

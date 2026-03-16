@@ -133,6 +133,7 @@ Regras normativas:
 3. O logger default continua sendo `logger.Nop()`, conforme a `Spec 031`.
 4. O runtime nunca deve assumir que o logger concreto suporta recursos fora desta interface minima.
 5. Adapters podem encapsular `slog`, `zap` ou outro backend local, desde que respeitem a interface publica.
+6. `pkg/logger` pode expor helpers aditivos para logger local simples e associacao do logger ao `context.Context`, desde que a interface `Logger` continue sendo a fronteira minima obrigatoria.
 
 ### 5.2 Logging estruturado
 
@@ -317,6 +318,7 @@ Campos adicionais por dominio:
 5. `agent.completed`, `agent.failed` e `agent.canceled` devem ser distinguiveis por evento e por nivel de log.
 6. `EventGuardrail` continua sendo a fonte canonica de observabilidade semantica de guardrails no dominio do agent.
 7. Panics em hooks de `Agent` devem ser recuperados e tratados como diagnostico local em log, sem alterar o resultado do run.
+8. Quando um `Agent` herdar hooks globais do `App`, esses hooks podem reutilizar o logger global sem reescrever configuracao privada de instancias prontas.
 
 ### 9.2 Tool e guardrail dentro do Agent
 
@@ -360,6 +362,7 @@ Durante `Start` e `EnsureStarted`, os seguintes acontecimentos devem ser observa
 3. Cada `step` deve ser observavel ao menos por `workflow.step_started` e `workflow.step_ended`, ou por `workflow.error` em falha.
 4. Retry deve permanecer observavel por historico local e por logs, mesmo sem novo evento publico dedicado nesta fase.
 5. Hooks de workflow observam a ordem cronologica real do run e devem receber metadados clonados defensivamente.
+6. Panics em hooks de `Workflow` devem ser recuperados e tratados como diagnostico local em log, sem alterar o resultado do workflow.
 
 ### 11.2 Integracao com Agent por adapter
 

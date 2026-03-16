@@ -804,6 +804,7 @@ func (a *App) listWorkflows() []workflow.Descriptor {
 }
 
 func (a *App) start(ctx context.Context) error {
+	ctx = a.Context(ctx)
 	a.emitEvent(ctx, EventAppStarting, nil, nil)
 
 	startedAgents, err := a.materializeAgents(ctx)
@@ -835,6 +836,11 @@ func (a *App) start(ctx context.Context) error {
 		if server == nil {
 			continue
 		}
+		if a.State() == StateStopping {
+			err := fmt.Errorf("%w: app is stopping", ErrAppStopped)
+			a.failStart(ctx, err)
+			return err
+		}
 		if err := server.Start(ctx, a.Runtime()); err != nil {
 			rollbackErr := a.rollbackStartedServers(ctx, startedServers)
 			a.mu.Lock()
@@ -850,6 +856,9 @@ func (a *App) start(ctx context.Context) error {
 			return err
 		}
 		startedServers = append(startedServers, server)
+		a.mu.Lock()
+		a.startedServers = append([]Server(nil), startedServers...)
+		a.mu.Unlock()
 	}
 
 	if err := a.runColdStartHooks(ctx); err != nil {
@@ -881,7 +890,10 @@ func (a *App) materializeAgents(ctx context.Context) (map[string]*agent.Agent, e
 	ready := cloneAgentMap(a.readyAgents)
 	factories := cloneAgentFactoryMap(a.agentFactories)
 	defaults := cloneAgentDefaults(a.defaults.Agent)
+	appLogger := a.logger
 	a.mu.RUnlock()
+
+	defaults.Hooks = append([]agent.Hook{agent.NewLoggingHook(appLogger)}, defaults.Hooks...)
 
 	for name := range ready {
 		if _, exists := factories[name]; exists {
@@ -916,7 +928,10 @@ func (a *App) materializeWorkflows(ctx context.Context) (map[string]workflow.Wor
 	ready := cloneWorkflowMap(a.readyWorkflows)
 	factories := cloneWorkflowFactoryMap(a.workflowFactories)
 	defaults := cloneWorkflowDefaults(a.defaults.Workflow)
+	appLogger := a.logger
 	a.mu.RUnlock()
+
+	defaults.Hooks = append([]workflow.Hook{workflow.NewLoggingHook(appLogger)}, defaults.Hooks...)
 
 	for name := range ready {
 		if _, exists := factories[name]; exists {
@@ -947,6 +962,7 @@ func (a *App) materializeWorkflows(ctx context.Context) (map[string]workflow.Wor
 }
 
 func (a *App) runColdStartHooks(ctx context.Context) error {
+	ctx = a.Context(ctx)
 	a.mu.Lock()
 	if a.coldStarted {
 		a.mu.Unlock()
@@ -972,6 +988,7 @@ func (a *App) runColdStartHooks(ctx context.Context) error {
 }
 
 func (a *App) rollbackStartedServers(ctx context.Context, startedServers []Server) error {
+	ctx = a.Context(ctx)
 	shutdownCtx, cancel := a.shutdownContext(ctx)
 	defer cancel()
 
@@ -995,10 +1012,10 @@ func (a *App) failStart(ctx context.Context, err error) {
 }
 
 func (a *App) emitEvent(ctx context.Context, eventType EventType, err error, extra types.Metadata) {
+	ctx = a.Context(ctx)
 	a.mu.RLock()
 	hooks := append([]Hook(nil), a.hooks...)
 	appName := a.name
-	metadata := types.MergeMetadata(a.defaults.Metadata, extra)
 	a.mu.RUnlock()
 
 	event := Event{
@@ -1006,8 +1023,10 @@ func (a *App) emitEvent(ctx context.Context, eventType EventType, err error, ext
 		AppName:  appName,
 		Time:     time.Now(),
 		Err:      err,
-		Metadata: metadata,
+		Metadata: a.eventMetadata(eventType, extra),
 	}
+
+	a.logAppEvent(ctx, event)
 
 	for _, hook := range hooks {
 		if hook == nil {
@@ -1015,9 +1034,11 @@ func (a *App) emitEvent(ctx context.Context, eventType EventType, err error, ext
 		}
 		func(h Hook) {
 			defer func() {
-				_ = recover()
+				if recovered := recover(); recovered != nil {
+					a.logHookPanic(ctx, eventType, recovered)
+				}
 			}()
-			h.OnEvent(ctx, event)
+			h.OnEvent(ctx, cloneAppEvent(event))
 		}(hook)
 	}
 }

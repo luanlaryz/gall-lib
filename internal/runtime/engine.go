@@ -13,6 +13,7 @@ import (
 
 	"github.com/luanlima/gaal-lib/pkg/agent"
 	"github.com/luanlima/gaal-lib/pkg/guardrail"
+	"github.com/luanlima/gaal-lib/pkg/logger"
 	"github.com/luanlima/gaal-lib/pkg/memory"
 	"github.com/luanlima/gaal-lib/pkg/tool"
 	"github.com/luanlima/gaal-lib/pkg/types"
@@ -220,7 +221,7 @@ func (e *engine) execute(
 			working.AddMessage(finalMessage)
 			workingSnapshot := working.Snapshot()
 
-			responseMetadata := types.MergeMetadata(req.Metadata, modelResponse.Metadata)
+			responseMetadata := preserveCorrelationMetadata(types.MergeMetadata(req.Metadata, modelResponse.Metadata), req.Metadata)
 			if definition.Memory != nil {
 				saveErr := definition.Memory.Save(ctx, req.SessionID, memory.Delta{
 					Messages: types.CloneMessages(workingSnapshot.Messages),
@@ -390,13 +391,13 @@ func (e *engine) collectStreamingModelResponse(
 	}()
 
 	var (
-		response             agent.ModelResponse
-		decisions            []agent.GuardrailDecision
-		sawEvent             bool
-		sawDelta             bool
-		sawStreamAdjustment  bool
-		bufferedContent      string
-		chunkIndex     int64
+		response            agent.ModelResponse
+		decisions           []agent.GuardrailDecision
+		sawEvent            bool
+		sawDelta            bool
+		sawStreamAdjustment bool
+		bufferedContent     string
+		chunkIndex          int64
 	)
 
 	for {
@@ -533,6 +534,7 @@ func (e *eventEmitter) emit(
 	if mutate != nil {
 		mutate(&event)
 	}
+	event.Metadata = e.enrichMetadata(event)
 
 	deliverToStream := true
 	if terminal && errors.Is(event.Err, agent.ErrStreamAborted) {
@@ -555,11 +557,107 @@ func (e *eventEmitter) emit(
 		}
 		func(h agent.Hook) {
 			defer func() {
-				_ = recover()
+				if recovered := recover(); recovered != nil {
+					logger.FromContext(ctx).ErrorContext(ctx, "agent.hook_panic",
+						"component", "agent",
+						"event_type", string(event.Type),
+						"agent_id", e.definition.Descriptor.ID,
+						"agent_name", e.definition.Descriptor.Name,
+						"run_id", e.req.RunID,
+						"panic", fmt.Sprint(recovered),
+					)
+				}
 			}()
-			h.OnEvent(ctx, event)
+			h.OnEvent(ctx, cloneAgentEvent(event))
 		}(hook)
 	}
+}
+
+func (e *eventEmitter) enrichMetadata(event agent.Event) types.Metadata {
+	metadata := types.MergeMetadata(event.Metadata, types.Metadata{
+		"component":  "agent",
+		"event_type": string(event.Type),
+		"agent_id":   e.definition.Descriptor.ID,
+		"agent_name": e.definition.Descriptor.Name,
+		"run_id":     e.req.RunID,
+		"session_id": e.req.SessionID,
+	})
+
+	if event.ToolCall != nil {
+		metadata = types.MergeMetadata(metadata, types.Metadata{
+			"tool_name":    event.ToolCall.Call.Name,
+			"tool_call_id": event.ToolCall.Call.ID,
+			"tool_status":  string(event.ToolCall.Status),
+		})
+	}
+	if event.Guardrail != nil {
+		metadata = types.MergeMetadata(metadata, types.Metadata{
+			"phase":          string(event.Guardrail.Decision.Phase),
+			"guardrail_name": event.Guardrail.Decision.Name,
+			"action":         string(event.Guardrail.Decision.Action),
+		})
+		metadata = types.MergeMetadata(metadata, event.Guardrail.Decision.Metadata)
+	}
+	if event.Response != nil {
+		metadata = types.MergeMetadata(metadata, types.Metadata{
+			"response_run_id": event.Response.RunID,
+		})
+	}
+	return metadata
+}
+
+func cloneAgentEvent(event agent.Event) agent.Event {
+	cloned := agent.Event{
+		Sequence:  event.Sequence,
+		Type:      event.Type,
+		RunID:     event.RunID,
+		AgentID:   event.AgentID,
+		SessionID: event.SessionID,
+		Time:      event.Time,
+		Err:       event.Err,
+		Metadata:  types.CloneMetadata(event.Metadata),
+	}
+	if event.Delta != nil {
+		delta := *event.Delta
+		cloned.Delta = &delta
+	}
+	if event.ToolCall != nil {
+		toolEvent := *event.ToolCall
+		toolEvent.Call = agent.ToolCallRecord{
+			ID:       event.ToolCall.Call.ID,
+			Name:     event.ToolCall.Call.Name,
+			Input:    cloneMap(event.ToolCall.Call.Input),
+			Output:   cloneToolResult(event.ToolCall.Call.Output),
+			Duration: event.ToolCall.Call.Duration,
+		}
+		cloned.ToolCall = &toolEvent
+	}
+	if event.Guardrail != nil {
+		guardrailEvent := *event.Guardrail
+		guardrailEvent.Decision.Metadata = types.CloneMetadata(event.Guardrail.Decision.Metadata)
+		cloned.Guardrail = &guardrailEvent
+	}
+	if event.Response != nil {
+		response := *event.Response
+		response.Message = types.CloneMessage(event.Response.Message)
+		response.ToolCalls = cloneToolCallRecords(event.Response.ToolCalls)
+		response.GuardrailDecisions = cloneGuardrailDecisions(event.Response.GuardrailDecisions)
+		response.Metadata = types.CloneMetadata(event.Response.Metadata)
+		cloned.Response = &response
+	}
+	return cloned
+}
+
+func preserveCorrelationMetadata(metadata, reqMetadata types.Metadata) types.Metadata {
+	for _, key := range []string{"trace_id", "span_id", "parent_span_id"} {
+		if value := reqMetadata[key]; value != "" {
+			if metadata == nil {
+				metadata = types.Metadata{}
+			}
+			metadata[key] = value
+		}
+	}
+	return metadata
 }
 
 func (e *eventEmitter) fail(ctx context.Context, err error) error {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/luanlima/gaal-lib/pkg/agent"
 	"github.com/luanlima/gaal-lib/pkg/app"
+	"github.com/luanlima/gaal-lib/pkg/logger"
 	"github.com/luanlima/gaal-lib/pkg/types"
 )
 
@@ -15,7 +16,12 @@ func main() {
 	ctx := context.Background()
 
 	instance, err := app.New(
-		app.Config{Name: "basic-agent"},
+		app.Config{
+			Name: "basic-agent",
+			Defaults: app.Defaults{
+				Logger: logger.Default(),
+			},
+		},
 		app.WithAgentFactories(greeterFactory{}),
 	)
 	if err != nil {
@@ -25,6 +31,7 @@ func main() {
 	if err := instance.Start(ctx); err != nil {
 		panic(err)
 	}
+	ctx = instance.Context(ctx)
 	defer func() {
 		_ = instance.Shutdown(ctx)
 	}()

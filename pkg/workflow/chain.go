@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luanlima/gaal-lib/pkg/logger"
 	"github.com/luanlima/gaal-lib/pkg/types"
 )
 
@@ -446,6 +447,7 @@ func (w *Chain) resolveNext(currentIndex int, stepName string, state *State, nex
 }
 
 func (w *Chain) emitLifecycle(ctx context.Context, event Event) error {
+	event.Metadata = w.enrichMetadata(event)
 	if err := w.appendHistory(ctx, HistoryEntry{
 		Kind:         string(event.Type),
 		WorkflowID:   event.WorkflowID,
@@ -468,12 +470,35 @@ func (w *Chain) emitLifecycle(ctx context.Context, event Event) error {
 		}
 		func(h Hook) {
 			defer func() {
-				_ = recover()
+				if recovered := recover(); recovered != nil {
+					logger.FromContext(ctx).ErrorContext(ctx, "workflow.hook_panic",
+						"component", "workflow",
+						"event_type", string(event.Type),
+						"workflow_id", w.id,
+						"workflow_name", w.name,
+						"run_id", event.RunID,
+						"step_name", event.StepName,
+						"panic", fmt.Sprint(recovered),
+					)
+				}
 			}()
 			h.OnEvent(ctx, cloneEvent(event))
 		}(hook)
 	}
 	return nil
+}
+
+func (w *Chain) enrichMetadata(event Event) types.Metadata {
+	return types.MergeMetadata(event.Metadata, types.Metadata{
+		"component":     "workflow",
+		"event_type":    string(event.Type),
+		"workflow_id":   event.WorkflowID,
+		"workflow_name": event.WorkflowName,
+		"run_id":        event.RunID,
+		"session_id":    event.SessionID,
+		"step_name":     event.StepName,
+		"attempt":       fmt.Sprintf("%d", event.Attempt),
+	})
 }
 
 func (w *Chain) appendHistory(ctx context.Context, entry HistoryEntry) error {

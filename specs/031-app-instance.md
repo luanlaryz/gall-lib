@@ -108,6 +108,10 @@ func (a *App) EnsureStarted(ctx context.Context) error
 func (a *App) Run(ctx context.Context) error
 func (a *App) Shutdown(ctx context.Context) error
 
+func (a *App) Health() bool
+func (a *App) Ready() bool
+func (a *App) Context(ctx context.Context) context.Context
+func (a *App) Invoke(ctx context.Context, target Target, run func(context.Context, Runtime) error) error
 func (a *App) Logger() logger.Logger
 func (a *App) Defaults() DefaultsSnapshot
 func (a *App) Runtime() Runtime
@@ -268,6 +272,9 @@ O restante da API de `workflow` deve ser detalhado em spec propria.
 - `EnsureStarted` deve ser idempotente e e o ponto recomendado para adapters serverless.
 - `Run` deve ser um helper de conveniencia equivalente a `Start`, espera por `ctx.Done()` e depois executa `Shutdown`.
 - `Shutdown` deve ser idempotente.
+- `Health()` e `Ready()` expõem a semantica local de probes sem exigir framework HTTP.
+- `Context(ctx)` deve anexar ao menos o logger global ao contexto derivado para reuso por runtimes e adapters.
+- `Invoke(ctx, target, run)` e o helper recomendado para adapters serverless envolverem uma invocacao curta com `EnsureStarted`, `OnInvokeStart` e `OnInvokeDone`.
 - `Runtime()` deve retornar uma view somente-leitura do runtime.
 - `Agents()` e `Workflows()` podem expor operacoes de registro apenas enquanto o `App` estiver em `StateCreated`.
 
@@ -473,7 +480,8 @@ Regras obrigatorias:
 - `WithServerlessHooks` registra hooks voltados a cold start e invocacoes curtas
 - `OnColdStart` deve ser disparado na primeira transicao bem-sucedida para runtime pronto em contexto serverless
 - `EnsureStarted` e a API recomendada para cold start seguro
-- `OnInvokeStart` e `OnInvokeDone` nao executam por conta propria; precisam ser chamados pelo adaptador serverless ao envolver uma invocacao
+- `Invoke(ctx, target, run)` pode ser usado como helper publico para executar `OnInvokeStart` e `OnInvokeDone` de forma consistente
+- adapters que nao usarem `Invoke` continuam responsaveis por chamar `OnInvokeStart` e `OnInvokeDone` ao envolver uma invocacao
 - `App` nao deve assumir existencia de processo residente no modo serverless
 
 ### 9.3 Fronteira de escopo
@@ -488,6 +496,8 @@ O `App` deve expor accessors estaveis para que adapters e codigo de composicao d
 Regras obrigatorias:
 
 - `Runtime()` retorna uma view somente-leitura do runtime e nunca o runtime interno concreto
+- `Health()` e `Ready()` devem refletir a semantica local de probes descrita nesta spec
+- `Context(ctx)` deve preservar cancelamento do contexto original ao anexar o logger global
 - `Runtime.ResolveAgent(name)` retorna o agent materializado associado ao nome
 - `Runtime.ResolveWorkflow(name)` retorna o workflow materializado associado ao nome
 - `Runtime.ListAgents()` e `Runtime.ListWorkflows()` retornam snapshots ordenados deterministicamente
