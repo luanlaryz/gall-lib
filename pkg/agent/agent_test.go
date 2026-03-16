@@ -30,6 +30,18 @@ func TestNewRejectsDuplicateTools(t *testing.T) {
 	}
 }
 
+func TestNewRejectsReservedInternalToolNamespace(t *testing.T) {
+	t.Parallel()
+
+	_, err := agent.New(
+		agent.Config{Name: "reserved-tools", Model: stubModel{}},
+		agent.WithTools(reservedTool{}),
+	)
+	if !errors.Is(err, agent.ErrInvalidConfig) {
+		t.Fatalf("expected invalid config error, got %v", err)
+	}
+}
+
 func TestRunSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -295,6 +307,30 @@ func (t stubTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		return t.call(ctx, call)
 	}
 	return tool.Result{Value: "ok", Content: "ok"}, nil
+}
+
+type reservedTool struct{}
+
+func (reservedTool) Name() string        { return "think" }
+func (reservedTool) Description() string { return "reserved" }
+func (reservedTool) InputSchema() tool.Schema {
+	return tool.Schema{
+		Type: "object",
+		Properties: map[string]tool.Schema{
+			"query": {Type: "string"},
+		},
+	}
+}
+func (reservedTool) OutputSchema() tool.Schema { return tool.Schema{Type: "string"} }
+func (reservedTool) Call(context.Context, tool.Call) (tool.Result, error) {
+	return tool.Result{Value: "ok", Content: "ok"}, nil
+}
+func (reservedTool) Descriptor() tool.Descriptor {
+	return tool.Descriptor{
+		Name:      "reasoning.think",
+		LocalName: "think",
+		Namespace: "reasoning",
+	}
 }
 
 type blockingInputGuardrail struct{}

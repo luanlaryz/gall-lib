@@ -25,6 +25,8 @@ var (
 	runSequence      atomic.Uint64
 )
 
+const reservedReasoningPrefix = "reasoning."
+
 // Agent is an immutable, concurrency-safe public agent handle.
 type Agent struct {
 	id               string
@@ -119,7 +121,12 @@ func New(cfg Config, opts ...Option) (*Agent, error) {
 
 	clonedTools := make([]tool.Tool, 0, len(resolved.tools))
 	for _, registeredTool := range resolved.tools {
-		frozenTool, err := toolRegistry.Resolve(tool.DescriptorOf(registeredTool).Name)
+		descriptor := tool.DescriptorOf(registeredTool)
+		if isReservedToolName(descriptor.Name) {
+			return nil, newError(ErrorKindInvalidConfig, "new", "", "", fmt.Errorf("%w: tool %q uses reserved internal namespace", ErrInvalidConfig, descriptor.Name))
+		}
+
+		frozenTool, err := toolRegistry.Resolve(descriptor.Name)
 		if err != nil {
 			return nil, newError(ErrorKindInvalidConfig, "new", "", "", err)
 		}
@@ -566,6 +573,9 @@ func (a *Agent) normalizeRequest(op string, ctx context.Context, req Request) (R
 		if name == "" {
 			return Request{}, newError(ErrorKindInvalidRequest, op, a.id, effective.RunID, fmt.Errorf("%w: allowed tool name cannot be empty", ErrInvalidRequest))
 		}
+		if isReservedToolName(name) {
+			return Request{}, newError(ErrorKindInvalidRequest, op, a.id, effective.RunID, fmt.Errorf("%w: allowed tool %q uses reserved internal namespace", ErrInvalidRequest, name))
+		}
 		if _, exists := allowedSet[name]; exists {
 			continue
 		}
@@ -585,6 +595,11 @@ func (a *Agent) hasTool(name string) bool {
 		}
 	}
 	return false
+}
+
+func isReservedToolName(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.HasPrefix(name, reservedReasoningPrefix)
 }
 
 func normalizeID(name string) string {

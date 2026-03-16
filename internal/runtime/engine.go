@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,11 +19,26 @@ import (
 )
 
 // NewEngine returns the default in-process execution engine used by pkg/app.
-func NewEngine() agent.Engine {
-	return &engine{}
+func NewEngine(opts ...Option) agent.Engine {
+	resolved := defaultEngineOptions()
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(&resolved)
+	}
+
+	reasoning, err := newReasoningRuntime(resolved.reasoning)
+	return &engine{
+		reasoning:    reasoning,
+		reasoningErr: err,
+	}
 }
 
-type engine struct{}
+type engine struct {
+	reasoning    *reasoningRuntime
+	reasoningErr error
+}
 
 func (e *engine) Run(ctx context.Context, a *agent.Agent, req agent.Request) (agent.Response, error) {
 	definition := a.Definition()
@@ -59,6 +75,9 @@ func (e *engine) execute(
 	req agent.Request,
 	emitter *eventEmitter,
 ) (agent.Response, error) {
+	if e.reasoningErr != nil {
+		return agent.Response{}, classifyError("reasoning.init", definition.Descriptor.ID, req.RunID, e.reasoningErr, agent.ErrorKindInternal)
+	}
 	if err := checkCanceled(ctx, "run", definition.Descriptor.ID, req.RunID); err != nil {
 		return agent.Response{}, emitter.fail(ctx, err)
 	}
@@ -96,6 +115,7 @@ func (e *engine) execute(
 	usage := types.Usage{}
 	toolCalls := make([]agent.ToolCallRecord, 0)
 	toolUsed := false
+	reasoning := newReasoningRun(e.reasoning, working)
 
 	for step := 0; step < req.MaxSteps; step++ {
 		if err := checkCanceled(ctx, "model.generate", definition.Descriptor.ID, req.RunID); err != nil {
@@ -124,14 +144,62 @@ func (e *engine) execute(
 		usage = usage.Add(modelResponse.Usage)
 
 		if len(modelResponse.ToolCalls) == 0 {
-			if req.ToolChoice == agent.ToolChoiceRequired && !toolUsed {
-				requiredErr := fmt.Errorf("tool call required but none executed")
-				return agent.Response{}, emitter.fail(ctx, classifyError("tool.required", definition.Descriptor.ID, req.RunID, requiredErr, agent.ErrorKindTool))
-			}
-
 			finalMessage := types.CloneMessage(modelResponse.Message)
 			if finalMessage.Role == "" {
 				finalMessage.Role = types.RoleAssistant
+			}
+
+			if reasoning != nil {
+				reasoningAction, reasoningErr := reasoning.beforeFinalResponse(
+					ctx,
+					definition,
+					req,
+					conversation,
+					effectiveTools,
+					modelResponse,
+					toolCalls,
+					finalMessage,
+					step+1,
+				)
+				if reasoningErr != nil {
+					return agent.Response{}, emitter.fail(ctx, classifyError("reasoning.final", definition.Descriptor.ID, req.RunID, reasoningErr, agent.ErrorKindInternal))
+				}
+
+				switch reasoningAction.kind {
+				case reasoningActionContinue:
+					conversation = appendInternalReasoningNote(conversation, reasoningAction.note)
+					if step == req.MaxSteps-1 {
+						return agent.Response{}, emitter.fail(ctx, classifyError("run.max_steps", definition.Descriptor.ID, req.RunID, errMaxSteps, agent.ErrorKindMaxSteps))
+					}
+					continue
+				case reasoningActionCallTool:
+					if err := e.executeSuggestedToolCall(
+						ctx,
+						definition,
+						req,
+						emitter,
+						effectiveTools,
+						&conversation,
+						working,
+						&toolCalls,
+						&toolUsed,
+						step,
+						reasoningAction,
+					); err != nil {
+						return agent.Response{}, emitter.fail(ctx, err)
+					}
+					if step == req.MaxSteps-1 {
+						return agent.Response{}, emitter.fail(ctx, classifyError("run.max_steps", definition.Descriptor.ID, req.RunID, errMaxSteps, agent.ErrorKindMaxSteps))
+					}
+					continue
+				case reasoningActionRespond:
+					finalMessage.Content = reasoningAction.toolResponse
+				}
+			}
+
+			if req.ToolChoice == agent.ToolChoiceRequired && !toolUsed {
+				requiredErr := fmt.Errorf("tool call required but none executed")
+				return agent.Response{}, emitter.fail(ctx, classifyError("tool.required", definition.Descriptor.ID, req.RunID, requiredErr, agent.ErrorKindTool))
 			}
 
 			finalMessage, outputDecisions, guardrailErr := applyOutputGuardrails(ctx, definition, req, emitter, finalMessage)
@@ -147,7 +215,7 @@ func (e *engine) execute(
 			if definition.Memory != nil {
 				saveErr := definition.Memory.Save(ctx, req.SessionID, memory.Delta{
 					Messages: types.CloneMessages(workingSnapshot.Messages),
-					Records:  cloneRecords(workingSnapshot.Records),
+					Records:  filterPersistedRecords(workingSnapshot.Records),
 					Response: cloneMessagePointer(finalMessage),
 					Metadata: types.CloneMetadata(responseMetadata),
 				})
@@ -195,74 +263,29 @@ func (e *engine) execute(
 			if err := checkCanceled(ctx, "tool.call", definition.Descriptor.ID, req.RunID); err != nil {
 				return agent.Response{}, emitter.fail(ctx, err)
 			}
-
-			selectedTool, ok := effectiveTools[modelToolCall.Name]
-			if !ok {
-				toolErr := fmt.Errorf("tool %q is not available for this run", modelToolCall.Name)
-				return agent.Response{}, emitter.fail(ctx, classifyError("tool.resolve", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool))
+			callRecord, invokeErr := e.invokePublicToolCall(
+				ctx,
+				definition,
+				req,
+				emitter,
+				effectiveTools,
+				modelToolCall,
+				step,
+				index,
+				&toolCalls,
+				&toolUsed,
+			)
+			if invokeErr != nil {
+				return agent.Response{}, emitter.fail(ctx, invokeErr)
 			}
-
-			toolDescriptor := tool.DescriptorOf(selectedTool)
-			callID := modelToolCall.ID
-			if callID == "" {
-				callID = newToolCallID(req.RunID, step, index)
-			}
-
-			toolUsed = true
-			callRecord := agent.ToolCallRecord{
-				ID:    callID,
-				Name:  toolDescriptor.Name,
-				Input: cloneMap(modelToolCall.Input),
-			}
-
-			emitter.emit(ctx, agent.EventToolCall, false, func(event *agent.Event) {
-				event.ToolCall = &agent.ToolCallEvent{
-					Call:   cloneToolCallRecord(callRecord),
-					Status: agent.ToolCallStarted,
-				}
-			})
-
-			startedAt := time.Now()
-			result, toolErr := tool.Invoke(ctx, selectedTool, tool.Call{
-				ID:        callID,
-				ToolName:  toolDescriptor.Name,
-				RunID:     req.RunID,
-				SessionID: req.SessionID,
-				AgentID:   definition.Descriptor.ID,
-				Input:     cloneMap(modelToolCall.Input),
-				Metadata:  types.CloneMetadata(req.Metadata),
-			})
-			callRecord.Duration = time.Since(startedAt)
-
-			if toolErr != nil {
-				emitter.emit(ctx, agent.EventToolResult, false, func(event *agent.Event) {
-					event.ToolCall = &agent.ToolCallEvent{
-						Call:   cloneToolCallRecord(callRecord),
-						Status: agent.ToolCallFailed,
-					}
-					event.Err = classifyError("tool.call", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool)
-				})
-
-				return agent.Response{}, emitter.fail(ctx, classifyError("tool.call", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool))
-			}
-
-			callRecord.Output = cloneToolResult(result)
-			toolCalls = append(toolCalls, callRecord)
-
-			emitter.emit(ctx, agent.EventToolResult, false, func(event *agent.Event) {
-				event.ToolCall = &agent.ToolCallEvent{
-					Call:   cloneToolCallRecord(callRecord),
-					Status: agent.ToolCallSucceeded,
-				}
-			})
 
 			working.AddRecord(memory.Record{
 				Kind: "tool_call",
 				Name: callRecord.Name,
 				Data: map[string]any{
 					"call_id": callRecord.ID,
-					"input":   cloneMap(modelToolCall.Input),
-					"output":  cloneToolResult(result),
+					"input":   cloneMap(callRecord.Input),
+					"output":  cloneToolResult(callRecord.Output),
 				},
 			})
 
@@ -270,11 +293,44 @@ func (e *engine) execute(
 				Role:       types.RoleTool,
 				Name:       callRecord.Name,
 				ToolCallID: callRecord.ID,
-				Content:    toolResultContent(result),
-				Metadata:   types.CloneMetadata(result.Metadata),
+				Content:    toolResultContent(callRecord.Output),
+				Metadata:   types.CloneMetadata(callRecord.Output.Metadata),
 			}
 			conversation = append(conversation, toolMessage)
 			working.AddMessage(toolMessage)
+
+			if reasoning != nil {
+				reasoningAction, reasoningErr := reasoning.afterToolResult(
+					ctx,
+					definition,
+					req,
+					conversation,
+					effectiveTools,
+					step+1,
+					callRecord,
+				)
+				if reasoningErr != nil {
+					return agent.Response{}, emitter.fail(ctx, classifyError("reasoning.tool_result", definition.Descriptor.ID, req.RunID, reasoningErr, agent.ErrorKindInternal))
+				}
+				if reasoningAction.kind == reasoningActionCallTool {
+					if err := e.executeSuggestedToolCall(
+						ctx,
+						definition,
+						req,
+						emitter,
+						effectiveTools,
+						&conversation,
+						working,
+						&toolCalls,
+						&toolUsed,
+						step,
+						reasoningAction,
+					); err != nil {
+						return agent.Response{}, emitter.fail(ctx, err)
+					}
+				}
+				conversation = appendInternalReasoningNote(conversation, reasoningAction.note)
+			}
 		}
 
 		if step == req.MaxSteps-1 {
@@ -625,6 +681,168 @@ func checkCanceled(ctx context.Context, op, agentID, runID string) error {
 	return nil
 }
 
+func (e *engine) invokePublicToolCall(
+	ctx context.Context,
+	definition agent.Definition,
+	req agent.Request,
+	emitter *eventEmitter,
+	effectiveTools map[string]tool.Tool,
+	modelToolCall agent.ModelToolCall,
+	step int,
+	index int,
+	toolCalls *[]agent.ToolCallRecord,
+	toolUsed *bool,
+) (agent.ToolCallRecord, error) {
+	if isReservedReasoningToolName(modelToolCall.Name) {
+		toolErr := fmt.Errorf("reserved internal tool %q cannot be invoked publicly", modelToolCall.Name)
+		return agent.ToolCallRecord{}, classifyError("tool.resolve", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool)
+	}
+
+	selectedTool, ok := effectiveTools[modelToolCall.Name]
+	if !ok {
+		toolErr := fmt.Errorf("tool %q is not available for this run", modelToolCall.Name)
+		return agent.ToolCallRecord{}, classifyError("tool.resolve", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool)
+	}
+
+	toolDescriptor := tool.DescriptorOf(selectedTool)
+	callID := modelToolCall.ID
+	if callID == "" {
+		callID = newToolCallID(req.RunID, step, index)
+	}
+
+	*toolUsed = true
+	callRecord := agent.ToolCallRecord{
+		ID:    callID,
+		Name:  toolDescriptor.Name,
+		Input: cloneMap(modelToolCall.Input),
+	}
+
+	emitter.emit(ctx, agent.EventToolCall, false, func(event *agent.Event) {
+		event.ToolCall = &agent.ToolCallEvent{
+			Call:   cloneToolCallRecord(callRecord),
+			Status: agent.ToolCallStarted,
+		}
+	})
+
+	startedAt := time.Now()
+	result, toolErr := tool.Invoke(ctx, selectedTool, tool.Call{
+		ID:        callID,
+		ToolName:  toolDescriptor.Name,
+		RunID:     req.RunID,
+		SessionID: req.SessionID,
+		AgentID:   definition.Descriptor.ID,
+		Input:     cloneMap(modelToolCall.Input),
+		Metadata:  types.CloneMetadata(req.Metadata),
+	})
+	callRecord.Duration = time.Since(startedAt)
+
+	if toolErr != nil {
+		classified := classifyError("tool.call", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool)
+		emitter.emit(ctx, agent.EventToolResult, false, func(event *agent.Event) {
+			event.ToolCall = &agent.ToolCallEvent{
+				Call:   cloneToolCallRecord(callRecord),
+				Status: agent.ToolCallFailed,
+			}
+			event.Err = classified
+		})
+		return agent.ToolCallRecord{}, classified
+	}
+
+	callRecord.Output = cloneToolResult(result)
+	*toolCalls = append(*toolCalls, callRecord)
+
+	emitter.emit(ctx, agent.EventToolResult, false, func(event *agent.Event) {
+		event.ToolCall = &agent.ToolCallEvent{
+			Call:   cloneToolCallRecord(callRecord),
+			Status: agent.ToolCallSucceeded,
+		}
+	})
+
+	return callRecord, nil
+}
+
+func (e *engine) executeSuggestedToolCall(
+	ctx context.Context,
+	definition agent.Definition,
+	req agent.Request,
+	emitter *eventEmitter,
+	effectiveTools map[string]tool.Tool,
+	conversation *[]types.Message,
+	working memory.WorkingSet,
+	toolCalls *[]agent.ToolCallRecord,
+	toolUsed *bool,
+	step int,
+	action reasoningAction,
+) error {
+	suggested := agent.ModelToolCall{
+		ID:    newToolCallID(req.RunID, step, len(*toolCalls)),
+		Name:  action.toolName,
+		Input: cloneMap(action.toolInput),
+	}
+
+	appendAssistantToolCallMessage(conversation, working, []agent.ModelToolCall{suggested})
+
+	callRecord, err := e.invokePublicToolCall(
+		ctx,
+		definition,
+		req,
+		emitter,
+		effectiveTools,
+		suggested,
+		step,
+		len(*toolCalls),
+		toolCalls,
+		toolUsed,
+	)
+	if err != nil {
+		return err
+	}
+
+	working.AddRecord(memory.Record{
+		Kind: "tool_call",
+		Name: callRecord.Name,
+		Data: map[string]any{
+			"call_id": callRecord.ID,
+			"input":   cloneMap(callRecord.Input),
+			"output":  cloneToolResult(callRecord.Output),
+		},
+	})
+
+	toolMessage := types.Message{
+		Role:       types.RoleTool,
+		Name:       callRecord.Name,
+		ToolCallID: callRecord.ID,
+		Content:    toolResultContent(callRecord.Output),
+		Metadata:   types.CloneMetadata(callRecord.Output.Metadata),
+	}
+	*conversation = append(*conversation, toolMessage)
+	working.AddMessage(toolMessage)
+	return nil
+}
+
+func appendAssistantToolCallMessage(conversation *[]types.Message, working memory.WorkingSet, calls []agent.ModelToolCall) {
+	if len(calls) == 0 {
+		return
+	}
+	message := types.Message{
+		Role:      types.RoleAssistant,
+		ToolCalls: toTypesToolCalls(cloneModelToolCalls(calls)),
+	}
+	*conversation = append(*conversation, message)
+	working.AddMessage(message)
+}
+
+func appendInternalReasoningNote(conversation []types.Message, note string) []types.Message {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return conversation
+	}
+	return append(conversation, types.Message{
+		Role:    types.RoleSystem,
+		Content: note,
+	})
+}
+
 func filterTools(registered []tool.Tool, req agent.Request) map[string]tool.Tool {
 	if req.ToolChoice == agent.ToolChoiceNone {
 		return nil
@@ -638,6 +856,9 @@ func filterTools(registered []tool.Tool, req agent.Request) map[string]tool.Tool
 	out := make(map[string]tool.Tool, len(registered))
 	for _, registeredTool := range registered {
 		descriptor := tool.DescriptorOf(registeredTool)
+		if isReservedReasoningToolName(descriptor.Name) {
+			continue
+		}
 		if len(allowed) > 0 {
 			if _, ok := allowed[descriptor.Name]; !ok {
 				continue
