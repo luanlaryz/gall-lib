@@ -29,7 +29,6 @@ Goal: ensure every change applies the right specialized skill and respects globa
   - `02-tenant-auth-quotas`: multi-tenant context, JWT/API keys, per-seller rate limits, CRM adapters.
   - `03-async-command-processing`: ACK 202, SQS FIFO, workers.
   - `04-streaming-sse-ws`: Redis Streams, SSE, WebSocket replay.
-  - `05-adk-agent-core`: ADK Go agent orchestration and streaming deltas.
   - `06-multi-provider-model-routing`: seller model routing, Postgres config, Redis cache.
   - `07-postgres-pgx-migrate`: pgx usage, migrations, multi-schema.
   - `08-redis-cache-streams`: caching, rate limit, locks, streams.
