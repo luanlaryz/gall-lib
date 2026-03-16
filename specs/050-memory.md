@@ -232,6 +232,14 @@ Um adapter em memoria e aceitavel na v1 desde que:
 - seja deterministico dentro do mesmo processo
 - deixe claro que nao oferece durabilidade entre reinicios
 
+A implementacao de referencia da biblioteca para esse caso e `memory.InMemoryStore`.
+
+Regras adicionais da implementacao de referencia:
+
+- `SessionID` continua sendo a chave publica observavel de `Load` e `Save`
+- o adapter pode organizar estado internamente por chaves auxiliares derivadas de metadata, como `user_id` e `conversation_id`, desde que isso nao altere a semantica publica baseada em `SessionID`
+- sessoes diferentes nao podem colidir apenas por compartilharem o mesmo `user_id` ou `conversation_id`
+
 ### 5.5 Adapter persistente
 
 Um adapter persistente e aceitavel na v1 desde que:
@@ -305,6 +313,8 @@ type WorkingSet interface {
 }
 ```
 
+A implementacao built-in de referencia para esse contrato na v1 e `memory.InMemoryWorkingMemoryFactory`.
+
 ### 7.2 Responsabilidades da working memory
 
 A working memory deve registrar ao menos:
@@ -371,7 +381,7 @@ Aplicado a memory na v1:
 - `agent.WithWorkingMemory` prevalece sobre `app.Defaults.Agent.WorkingMemory`
 - se factory de agent nao fornecer store, ela pode herdar `app.Defaults.Agent.Memory`
 - se nenhum store for definido em nivel algum, o built-in e "sem memoria conversacional persistente"
-- se nenhuma working memory factory for definida em nivel algum, o built-in e uma working memory efemera em memoria de processo
+- se nenhuma working memory factory for definida em nivel algum, o built-in e `memory.InMemoryWorkingMemoryFactory`, uma working memory efemera em memoria de processo
 
 ### 9.2 Regras de merge
 
