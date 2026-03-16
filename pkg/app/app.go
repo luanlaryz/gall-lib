@@ -70,6 +70,7 @@ type AgentDefaults struct {
 	Memory           memory.Store
 	WorkingMemory    memory.WorkingMemoryFactory
 	InputGuardrails  []guardrail.Input
+	StreamGuardrails []guardrail.Stream
 	OutputGuardrails []guardrail.Output
 	Hooks            []agent.Hook
 }
@@ -1096,6 +1097,7 @@ func mergeAgentDefaults(base, override AgentDefaults) AgentDefaults {
 		out.WorkingMemory = override.WorkingMemory
 	}
 	out.InputGuardrails = append(out.InputGuardrails, override.InputGuardrails...)
+	out.StreamGuardrails = append(out.StreamGuardrails, override.StreamGuardrails...)
 	out.OutputGuardrails = append(out.OutputGuardrails, override.OutputGuardrails...)
 	out.Hooks = append(out.Hooks, override.Hooks...)
 	return out
@@ -1132,6 +1134,7 @@ func cloneAgentDefaults(in AgentDefaults) AgentDefaults {
 		Memory:           in.Memory,
 		WorkingMemory:    in.WorkingMemory,
 		InputGuardrails:  append([]guardrail.Input(nil), in.InputGuardrails...),
+		StreamGuardrails: append([]guardrail.Stream(nil), in.StreamGuardrails...),
 		OutputGuardrails: append([]guardrail.Output(nil), in.OutputGuardrails...),
 		Hooks:            append([]agent.Hook(nil), in.Hooks...),
 	}

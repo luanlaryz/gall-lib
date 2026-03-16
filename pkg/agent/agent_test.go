@@ -89,6 +89,31 @@ func TestNewUsesInMemoryWorkingMemoryByDefault(t *testing.T) {
 	}
 }
 
+func TestDefinitionIncludesStreamGuardrails(t *testing.T) {
+	t.Parallel()
+
+	streamRule := noopStreamGuardrail{name: "stream"}
+	ag, err := agent.New(
+		agent.Config{Name: "stream-guarded", Model: stubModel{}},
+		agent.WithExecutionEngine(coreruntime.NewEngine()),
+		agent.WithStreamGuardrails(streamRule),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	definition := ag.Definition()
+	if got := len(definition.StreamGuardrails); got != 1 {
+		t.Fatalf("Definition().StreamGuardrails = %d want 1", got)
+	}
+	if _, ok := definition.StreamGuardrails[0].(noopStreamGuardrail); !ok {
+		t.Fatalf("Definition().StreamGuardrails[0] = %T", definition.StreamGuardrails[0])
+	}
+	if agent.GuardrailPhaseStream != agent.GuardrailPhase("stream") {
+		t.Fatalf("GuardrailPhaseStream = %q", agent.GuardrailPhaseStream)
+	}
+}
+
 func TestRunWithToolCallFeedsNextModelStep(t *testing.T) {
 	t.Parallel()
 
@@ -357,6 +382,14 @@ func (blockingInputGuardrail) CheckInput(context.Context, guardrail.InputRequest
 		Action: guardrail.ActionBlock,
 		Reason: "blocked for test",
 	}, nil
+}
+
+type noopStreamGuardrail struct {
+	name string
+}
+
+func (g noopStreamGuardrail) CheckStream(context.Context, guardrail.StreamRequest) (guardrail.Decision, error) {
+	return guardrail.Decision{Name: g.name, Action: guardrail.ActionAllow}, nil
 }
 
 type memoryStoreStub struct {

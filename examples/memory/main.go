@@ -91,6 +91,18 @@ func (memoryGreeterFactory) Build(_ context.Context, defaults app.AgentDefaults)
 	if defaults.WorkingMemory != nil {
 		opts = append(opts, agent.WithWorkingMemory(defaults.WorkingMemory))
 	}
+	if len(defaults.InputGuardrails) > 0 {
+		opts = append(opts, agent.WithInputGuardrails(defaults.InputGuardrails...))
+	}
+	if len(defaults.StreamGuardrails) > 0 {
+		opts = append(opts, agent.WithStreamGuardrails(defaults.StreamGuardrails...))
+	}
+	if len(defaults.OutputGuardrails) > 0 {
+		opts = append(opts, agent.WithOutputGuardrails(defaults.OutputGuardrails...))
+	}
+	if len(defaults.Hooks) > 0 {
+		opts = append(opts, agent.WithHooks(defaults.Hooks...))
+	}
 
 	return agent.New(
 		agent.Config{

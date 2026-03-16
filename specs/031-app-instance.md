@@ -85,6 +85,7 @@ type AgentDefaults struct {
     Memory              memory.Store
     WorkingMemory       memory.WorkingMemoryFactory
     InputGuardrails     []guardrail.Input
+    StreamGuardrails    []guardrail.Stream
     OutputGuardrails    []guardrail.Output
     Hooks               []agent.Hook
 }
@@ -335,6 +336,7 @@ Dentro de `AgentDefaults`, a v1 deve suportar ao menos:
 - `Memory`
 - `WorkingMemory`
 - input guardrails
+- stream guardrails
 - output guardrails
 - hooks
 

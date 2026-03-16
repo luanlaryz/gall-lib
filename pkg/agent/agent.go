@@ -37,6 +37,7 @@ type Agent struct {
 	memory           memory.Store
 	workingMemory    memory.WorkingMemoryFactory
 	inputGuardrails  []guardrail.Input
+	streamGuardrails []guardrail.Stream
 	outputGuardrails []guardrail.Output
 	hooks            []Hook
 	metadata         types.Metadata
@@ -66,6 +67,7 @@ type Definition struct {
 	Memory           memory.Store
 	WorkingMemory    memory.WorkingMemoryFactory
 	InputGuardrails  []guardrail.Input
+	StreamGuardrails []guardrail.Stream
 	OutputGuardrails []guardrail.Output
 	Hooks            []Hook
 	Metadata         types.Metadata
@@ -78,6 +80,7 @@ type options struct {
 	memory           memory.Store
 	workingMemory    memory.WorkingMemoryFactory
 	inputGuardrails  []guardrail.Input
+	streamGuardrails []guardrail.Stream
 	outputGuardrails []guardrail.Output
 	hooks            []Hook
 	maxSteps         int
@@ -152,6 +155,7 @@ func New(cfg Config, opts ...Option) (*Agent, error) {
 		memory:           resolved.memory,
 		workingMemory:    workingFactory,
 		inputGuardrails:  append([]guardrail.Input(nil), resolved.inputGuardrails...),
+		streamGuardrails: append([]guardrail.Stream(nil), resolved.streamGuardrails...),
 		outputGuardrails: append([]guardrail.Output(nil), resolved.outputGuardrails...),
 		hooks:            append([]Hook(nil), resolved.hooks...),
 		metadata:         types.CloneMetadata(resolved.metadata),
@@ -198,6 +202,7 @@ func (a *Agent) Definition() Definition {
 		Memory:           a.memory,
 		WorkingMemory:    a.workingMemory,
 		InputGuardrails:  append([]guardrail.Input(nil), a.inputGuardrails...),
+		StreamGuardrails: append([]guardrail.Stream(nil), a.streamGuardrails...),
 		OutputGuardrails: append([]guardrail.Output(nil), a.outputGuardrails...),
 		Hooks:            append([]Hook(nil), a.hooks...),
 		Metadata:         types.CloneMetadata(a.metadata),
@@ -367,12 +372,14 @@ type GuardrailEvent struct {
 	Decision GuardrailDecision
 }
 
-// GuardrailPhase identifies whether a decision happened on input or output.
+// GuardrailPhase identifies the stage where a guardrail decision happened.
 type GuardrailPhase string
 
 const (
 	// GuardrailPhaseInput identifies input-stage guardrail decisions.
 	GuardrailPhaseInput GuardrailPhase = "input"
+	// GuardrailPhaseStream identifies stream-stage guardrail decisions.
+	GuardrailPhaseStream GuardrailPhase = "stream"
 	// GuardrailPhaseOutput identifies output-stage guardrail decisions.
 	GuardrailPhaseOutput GuardrailPhase = "output"
 )
@@ -481,6 +488,14 @@ func WithWorkingMemory(factory memory.WorkingMemoryFactory) Option {
 func WithInputGuardrails(guardrails ...guardrail.Input) Option {
 	return func(opts *options) error {
 		opts.inputGuardrails = append(opts.inputGuardrails, guardrails...)
+		return nil
+	}
+}
+
+// WithStreamGuardrails registers stream guardrails in order.
+func WithStreamGuardrails(guardrails ...guardrail.Stream) Option {
+	return func(opts *options) error {
+		opts.streamGuardrails = append(opts.streamGuardrails, guardrails...)
 		return nil
 	}
 }

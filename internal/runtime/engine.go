@@ -118,7 +118,11 @@ func (e *engine) execute(
 	reasoning := newReasoningRun(e.reasoning, working)
 
 	for step := 0; step < req.MaxSteps; step++ {
-		if err := checkCanceled(ctx, "model.generate", definition.Descriptor.ID, req.RunID); err != nil {
+		modelOp := "model.generate"
+		if emitter.stream != nil {
+			modelOp = "model.stream"
+		}
+		if err := checkCanceled(ctx, modelOp, definition.Descriptor.ID, req.RunID); err != nil {
 			return agent.Response{}, emitter.fail(ctx, err)
 		}
 
@@ -136,10 +140,15 @@ func (e *engine) execute(
 			Tools:        buildToolSpecs(effectiveTools),
 		}
 
-		modelResponse, modelErr := definition.Model.Generate(ctx, modelRequest)
+		modelResponse, streamDecisions, modelErr := e.collectModelResponse(ctx, definition, req, emitter, modelRequest)
 		if modelErr != nil {
-			return agent.Response{}, emitter.fail(ctx, classifyError("model.generate", definition.Descriptor.ID, req.RunID, modelErr, agent.ErrorKindModel))
+			var agentErr *agent.Error
+			if errors.As(modelErr, &agentErr) {
+				return agent.Response{}, emitter.fail(ctx, modelErr)
+			}
+			return agent.Response{}, emitter.fail(ctx, classifyError(modelOp, definition.Descriptor.ID, req.RunID, modelErr, agent.ErrorKindModel))
 		}
+		decisions = append(decisions, streamDecisions...)
 
 		usage = usage.Add(modelResponse.Usage)
 
@@ -341,6 +350,152 @@ func (e *engine) execute(
 	return agent.Response{}, emitter.fail(ctx, classifyError("run.max_steps", definition.Descriptor.ID, req.RunID, errMaxSteps, agent.ErrorKindMaxSteps))
 }
 
+func (e *engine) collectModelResponse(
+	ctx context.Context,
+	definition agent.Definition,
+	req agent.Request,
+	emitter *eventEmitter,
+	modelRequest agent.ModelRequest,
+) (agent.ModelResponse, []agent.GuardrailDecision, error) {
+	if emitter.stream == nil {
+		modelResponse, err := definition.Model.Generate(ctx, modelRequest)
+		return modelResponse, nil, err
+	}
+
+	modelResponse, decisions, streamed, err := e.collectStreamingModelResponse(ctx, definition, req, emitter, modelRequest)
+	if err != nil {
+		return agent.ModelResponse{}, nil, err
+	}
+	if streamed {
+		return modelResponse, decisions, nil
+	}
+
+	modelResponse, err = definition.Model.Generate(ctx, modelRequest)
+	return modelResponse, nil, err
+}
+
+func (e *engine) collectStreamingModelResponse(
+	ctx context.Context,
+	definition agent.Definition,
+	req agent.Request,
+	emitter *eventEmitter,
+	modelRequest agent.ModelRequest,
+) (agent.ModelResponse, []agent.GuardrailDecision, bool, error) {
+	modelStream, err := definition.Model.Stream(ctx, modelRequest)
+	if err != nil {
+		return agent.ModelResponse{}, nil, false, err
+	}
+	defer func() {
+		_ = modelStream.Close()
+	}()
+
+	var (
+		response             agent.ModelResponse
+		decisions            []agent.GuardrailDecision
+		sawEvent             bool
+		sawDelta             bool
+		sawStreamAdjustment  bool
+		bufferedContent      string
+		chunkIndex     int64
+	)
+
+	for {
+		event, recvErr := modelStream.Recv()
+		if recvErr != nil {
+			if errors.Is(recvErr, io.EOF) {
+				break
+			}
+			return agent.ModelResponse{}, decisions, sawEvent, recvErr
+		}
+
+		sawEvent = true
+		response.Usage = response.Usage.Add(event.Usage)
+
+		if event.Delta != nil {
+			sawDelta = true
+			chunkIndex++
+
+			delta, streamDecisions, outcome, changed, streamErr := applyStreamGuardrails(
+				ctx,
+				definition,
+				req,
+				emitter,
+				types.MessageDelta{
+					RunID:   event.Delta.RunID,
+					Role:    event.Delta.Role,
+					Content: event.Delta.Content,
+				},
+				chunkIndex,
+				bufferedContent,
+			)
+			decisions = append(decisions, streamDecisions...)
+			if streamErr != nil {
+				return agent.ModelResponse{}, decisions, true, streamErr
+			}
+
+			switch outcome {
+			case streamChunkEmit:
+				bufferedContent += delta.Content
+				if delta.Role == "" {
+					delta.Role = types.RoleAssistant
+				}
+				if delta.RunID == "" {
+					delta.RunID = req.RunID
+				}
+				emitter.emit(ctx, agent.EventAgentDelta, false, func(out *agent.Event) {
+					cloned := delta
+					out.Delta = &cloned
+				})
+			case streamChunkDrop:
+			}
+
+			if changed {
+				sawStreamAdjustment = true
+			}
+		}
+
+		if event.ToolCall != nil {
+			response.ToolCalls = append(response.ToolCalls, agent.ModelToolCall{
+				ID:    event.ToolCall.ID,
+				Name:  event.ToolCall.Name,
+				Input: cloneMap(event.ToolCall.Input),
+			})
+		}
+
+		if event.Message != nil {
+			response.Message = types.CloneMessage(*event.Message)
+			if response.Message.Role == "" {
+				response.Message.Role = types.RoleAssistant
+			}
+		}
+
+		if event.Done {
+			break
+		}
+	}
+
+	if !sawEvent {
+		return agent.ModelResponse{}, nil, false, nil
+	}
+
+	if len(response.ToolCalls) > 0 {
+		return response, decisions, true, nil
+	}
+
+	if sawDelta && (sawStreamAdjustment || response.Message.Content == "") {
+		response.Message = types.Message{
+			Role:    types.RoleAssistant,
+			Content: bufferedContent,
+		}
+	}
+
+	if response.Message.Role == "" && (sawDelta || len(response.Message.ToolCalls) == 0) {
+		response.Message.Role = types.RoleAssistant
+	}
+
+	return response, decisions, true, nil
+}
+
 var errMaxSteps = errors.New("max steps exceeded")
 
 type eventEmitter struct {
@@ -511,15 +666,21 @@ func applyInputGuardrails(
 		}
 
 		decision, err := rule.CheckInput(ctx, guardrail.InputRequest{
-			AgentID:   definition.Descriptor.ID,
-			AgentName: definition.Descriptor.Name,
-			RunID:     req.RunID,
-			SessionID: req.SessionID,
-			Messages:  types.CloneMessages(messages),
-			Metadata:  types.CloneMetadata(req.Metadata),
+			Context: guardrail.Context{
+				Phase:     guardrail.PhaseInput,
+				AgentID:   definition.Descriptor.ID,
+				AgentName: definition.Descriptor.Name,
+				RunID:     req.RunID,
+				SessionID: req.SessionID,
+				Metadata:  types.CloneMetadata(req.Metadata),
+			},
+			Messages: types.CloneMessages(messages),
 		})
 		if err != nil {
 			return nil, nil, classifyError("guardrail.input", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
+		}
+		if err := validateGuardrailDecision(guardrail.PhaseInput, decision); err != nil {
+			return nil, decisions, classifyError("guardrail.input", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
 		}
 
 		normalized := normalizeGuardrailDecision(agent.GuardrailPhaseInput, decision, rule)
@@ -531,9 +692,7 @@ func applyInputGuardrails(
 		switch decision.Action {
 		case guardrail.ActionAllow:
 		case guardrail.ActionTransform:
-			if decision.Messages != nil {
-				messages = types.CloneMessages(decision.Messages)
-			}
+			messages = types.CloneMessages(decision.Messages)
 		case guardrail.ActionBlock:
 			blockErr := &agent.Error{
 				Kind:    agent.ErrorKindGuardrailBlocked,
@@ -565,15 +724,21 @@ func applyOutputGuardrails(
 		}
 
 		decision, err := rule.CheckOutput(ctx, guardrail.OutputRequest{
-			AgentID:   definition.Descriptor.ID,
-			AgentName: definition.Descriptor.Name,
-			RunID:     req.RunID,
-			SessionID: req.SessionID,
-			Message:   types.CloneMessage(out),
-			Metadata:  types.CloneMetadata(req.Metadata),
+			Context: guardrail.Context{
+				Phase:     guardrail.PhaseOutput,
+				AgentID:   definition.Descriptor.ID,
+				AgentName: definition.Descriptor.Name,
+				RunID:     req.RunID,
+				SessionID: req.SessionID,
+				Metadata:  types.CloneMetadata(req.Metadata),
+			},
+			Message: types.CloneMessage(out),
 		})
 		if err != nil {
 			return types.Message{}, nil, classifyError("guardrail.output", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
+		}
+		if err := validateGuardrailDecision(guardrail.PhaseOutput, decision); err != nil {
+			return types.Message{}, decisions, classifyError("guardrail.output", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
 		}
 
 		normalized := normalizeGuardrailDecision(agent.GuardrailPhaseOutput, decision, rule)
@@ -585,9 +750,7 @@ func applyOutputGuardrails(
 		switch decision.Action {
 		case guardrail.ActionAllow:
 		case guardrail.ActionTransform:
-			if decision.Message != nil {
-				out = types.CloneMessage(*decision.Message)
-			}
+			out = types.CloneMessage(*decision.Message)
 		case guardrail.ActionBlock:
 			blockErr := &agent.Error{
 				Kind:    agent.ErrorKindGuardrailBlocked,
@@ -601,6 +764,95 @@ func applyOutputGuardrails(
 	}
 
 	return out, decisions, nil
+}
+
+type streamChunkOutcome uint8
+
+const (
+	streamChunkEmit streamChunkOutcome = iota
+	streamChunkDrop
+)
+
+func applyStreamGuardrails(
+	ctx context.Context,
+	definition agent.Definition,
+	req agent.Request,
+	emitter *eventEmitter,
+	delta types.MessageDelta,
+	chunkIndex int64,
+	bufferedContent string,
+) (types.MessageDelta, []agent.GuardrailDecision, streamChunkOutcome, bool, error) {
+	current := cloneMessageDelta(delta)
+	if current.Role == "" {
+		current.Role = types.RoleAssistant
+	}
+	if current.RunID == "" {
+		current.RunID = req.RunID
+	}
+
+	decisions := make([]agent.GuardrailDecision, 0, len(definition.StreamGuardrails))
+	for _, rule := range definition.StreamGuardrails {
+		if rule == nil {
+			continue
+		}
+
+		decision, err := rule.CheckStream(ctx, guardrail.StreamRequest{
+			Context: guardrail.Context{
+				Phase:     guardrail.PhaseStream,
+				AgentID:   definition.Descriptor.ID,
+				AgentName: definition.Descriptor.Name,
+				RunID:     req.RunID,
+				SessionID: req.SessionID,
+				Metadata:  types.CloneMetadata(req.Metadata),
+			},
+			ChunkIndex:      chunkIndex,
+			Delta:           cloneMessageDelta(current),
+			BufferedContent: bufferedContent,
+		})
+		if err != nil {
+			return types.MessageDelta{}, decisions, streamChunkEmit, false, classifyError("guardrail.stream", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
+		}
+		if err := validateGuardrailDecision(guardrail.PhaseStream, decision); err != nil {
+			return types.MessageDelta{}, decisions, streamChunkEmit, false, classifyError("guardrail.stream", definition.Descriptor.ID, req.RunID, err, agent.ErrorKindInternal)
+		}
+
+		normalized := normalizeStreamGuardrailDecision(decision, rule, chunkIndex)
+		decisions = append(decisions, normalized)
+		emitter.emit(ctx, agent.EventGuardrail, false, func(event *agent.Event) {
+			event.Guardrail = &agent.GuardrailEvent{Decision: normalized}
+		})
+
+		switch decision.Action {
+		case guardrail.ActionAllow:
+		case guardrail.ActionTransform:
+			current = cloneMessageDelta(*decision.Delta)
+			if current.Role == "" {
+				current.Role = delta.Role
+			}
+			if current.Role == "" {
+				current.Role = types.RoleAssistant
+			}
+			if current.RunID == "" {
+				current.RunID = delta.RunID
+			}
+			if current.RunID == "" {
+				current.RunID = req.RunID
+			}
+		case guardrail.ActionDrop:
+			return types.MessageDelta{}, decisions, streamChunkDrop, true, nil
+		case guardrail.ActionAbort:
+			blockErr := &agent.Error{
+				Kind:    agent.ErrorKindGuardrailBlocked,
+				Op:      "guardrail.stream",
+				AgentID: definition.Descriptor.ID,
+				RunID:   req.RunID,
+				Cause:   fmt.Errorf("%w: %s", agent.ErrGuardrailBlocked, normalized.Reason),
+			}
+			return types.MessageDelta{}, decisions, streamChunkEmit, true, blockErr
+		}
+	}
+
+	return current, decisions, streamChunkEmit, current != delta, nil
 }
 
 func normalizeGuardrailDecision(
@@ -619,6 +871,69 @@ func normalizeGuardrailDecision(
 		Action:   decision.Action,
 		Reason:   decision.Reason,
 		Metadata: types.CloneMetadata(decision.Metadata),
+	}
+}
+
+func normalizeStreamGuardrailDecision(
+	decision guardrail.Decision,
+	rule any,
+	chunkIndex int64,
+) agent.GuardrailDecision {
+	normalized := normalizeGuardrailDecision(agent.GuardrailPhaseStream, decision, rule)
+	metadata := types.CloneMetadata(normalized.Metadata)
+	if metadata == nil {
+		metadata = types.Metadata{}
+	}
+	metadata["chunk_index"] = fmt.Sprintf("%d", chunkIndex)
+	normalized.Metadata = metadata
+	return normalized
+}
+
+func validateGuardrailDecision(phase guardrail.Phase, decision guardrail.Decision) error {
+	switch decision.Action {
+	case guardrail.ActionAllow:
+		return nil
+	case guardrail.ActionTransform:
+		switch phase {
+		case guardrail.PhaseInput:
+			if decision.Messages == nil {
+				return errors.New("input guardrail transform requires messages")
+			}
+		case guardrail.PhaseStream:
+			if decision.Delta == nil {
+				return errors.New("stream guardrail transform requires delta")
+			}
+			if decision.Delta.Role != "" && decision.Delta.Role != types.RoleAssistant {
+				return errors.New("stream guardrail transform requires assistant delta role")
+			}
+		case guardrail.PhaseOutput:
+			if decision.Message == nil {
+				return errors.New("output guardrail transform requires message")
+			}
+			if decision.Message.Role != "" && decision.Message.Role != types.RoleAssistant {
+				return errors.New("output guardrail transform requires assistant message role")
+			}
+		default:
+			return errors.New("unknown guardrail phase")
+		}
+		return nil
+	case guardrail.ActionBlock:
+		if phase == guardrail.PhaseStream {
+			return errors.New("stream guardrail cannot block")
+		}
+		return nil
+	case guardrail.ActionDrop:
+		if phase != guardrail.PhaseStream {
+			return errors.New("drop is only valid for stream guardrails")
+		}
+		return nil
+	case guardrail.ActionAbort:
+		if phase != guardrail.PhaseStream {
+			return errors.New("abort is only valid for stream guardrails")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown guardrail action %q", decision.Action)
 	}
 }
 
@@ -953,6 +1268,14 @@ func cloneToolCallRecords(records []agent.ToolCallRecord) []agent.ToolCallRecord
 		out[index] = cloneToolCallRecord(record)
 	}
 	return out
+}
+
+func cloneMessageDelta(delta types.MessageDelta) types.MessageDelta {
+	return types.MessageDelta{
+		RunID:   delta.RunID,
+		Role:    delta.Role,
+		Content: delta.Content,
+	}
 }
 
 func cloneGuardrailDecisions(in []agent.GuardrailDecision) []agent.GuardrailDecision {

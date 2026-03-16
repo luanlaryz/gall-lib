@@ -17,7 +17,7 @@ Ficam fora do escopo deste documento:
 - HTTP, gRPC, SSE, WebSocket ou qualquer adaptador de transporte
 - recursos de VoltOps, observabilidade hospedada ou control plane
 - handoffs, multi-agent orchestration e workflow composition detalhada
-- streaming guardrails sobre deltas parciais na v1
+- definicao detalhada de adapters de transporte para expor streaming fora da API publica do `Agent`
 
 ## 2. Terminologia
 
@@ -28,7 +28,7 @@ Ficam fora do escopo deste documento:
 - `Working memory`: estado efemero de um unico run, usado para acumular contexto temporario, tool calls e resultados intermediarios.
 - `Memory`: estado persistente ou compartilhado entre runs, associado a uma `Session`.
 - `Tool call`: invocacao de uma tool registrada pelo agente durante o loop de execucao.
-- `Guardrail`: validacao, bloqueio ou transformacao aplicada a input ou output.
+- `Guardrail`: validacao, bloqueio ou transformacao aplicada a input, streaming parcial ou output final.
 - `Hook`: observador local de eventos do run, usado para tracing, metricas e logging.
 - `Cancelamento`: encerramento cooperativo disparado por `context.Context`.
 - `Stream abortado`: encerramento iniciado pelo consumidor do stream via `Close()`.
@@ -108,6 +108,7 @@ type Definition struct {
     Memory           memory.Store
     WorkingMemory    memory.WorkingMemoryFactory
     InputGuardrails  []guardrail.Input
+    StreamGuardrails []guardrail.Stream
     OutputGuardrails []guardrail.Output
     Hooks            []Hook
     Metadata         types.Metadata
@@ -225,6 +226,7 @@ type GuardrailPhase string
 
 const (
     GuardrailPhaseInput  GuardrailPhase = "input"
+    GuardrailPhaseStream GuardrailPhase = "stream"
     GuardrailPhaseOutput GuardrailPhase = "output"
 )
 ```
@@ -328,6 +330,10 @@ type Input interface {
     CheckInput(ctx context.Context, req InputRequest) (Decision, error)
 }
 
+type Stream interface {
+    CheckStream(ctx context.Context, req StreamRequest) (Decision, error)
+}
+
 type Output interface {
     CheckOutput(ctx context.Context, req OutputRequest) (Decision, error)
 }
@@ -358,6 +364,7 @@ type Output interface {
 - `WithMemory(store memory.Store)` habilita memory persistente por `SessionID`.
 - `WithWorkingMemory(factory memory.WorkingMemoryFactory)` substitui a working memory padrao por run.
 - `WithInputGuardrails(gs ...guardrail.Input)` registra guardrails de input em ordem.
+- `WithStreamGuardrails(gs ...guardrail.Stream)` registra guardrails de stream em ordem.
 - `WithOutputGuardrails(gs ...guardrail.Output)` registra guardrails de output em ordem.
 - `WithHooks(hooks ...Hook)` registra hooks observaveis em ordem.
 - `WithMaxSteps(n int)` define teto maximo de iteracoes do loop de execucao.
@@ -489,7 +496,7 @@ O `Agent` deve separar claramente memory persistente de working memory.
 
 ## 10. Integracao com guardrails
 
-O `Agent` deve suportar guardrails de input e de output como parte do contrato principal.
+O `Agent` deve suportar guardrails de input, stream e output como parte do contrato principal.
 
 ### 10.1 Input guardrails
 
@@ -507,13 +514,25 @@ O `Agent` deve suportar guardrails de input e de output como parte do contrato p
 - Um `transform` de output altera a resposta final observavel.
 - Um `block` de output invalida o run e impede `EventAgentCompleted`.
 
-### 10.3 Regras de semantica
+### 10.3 Stream guardrails
+
+- Executam apenas durante `Stream`, antes de cada `EventAgentDelta` candidato.
+- Tambem obedecem a ordem de registro e recebem snapshots publicos do delta atual e do buffer efetivo aprovado.
+- Cada stream guardrail pode:
+  - `allow`: emitir o chunk inalterado
+  - `transform`: substituir o chunk parcial visivel ao proximo guardrail, ao consumidor e ao buffer efetivo
+  - `drop`: suprimir apenas o chunk corrente sem abortar o run
+  - `abort`: encerrar o run com erro classificado de guardrail, sem `EventAgentCompleted`
+- O output final usado pelos output guardrails deve partir do buffer efetivo aprovado quando houver `transform` ou `drop` em stream.
+
+### 10.4 Regras de semantica
 
 - Guardrail bloqueado e diferente de guardrail com falha tecnica.
 - `block` deve produzir `ErrGuardrailBlocked` com detalhes da decisao.
+- `abort` em stream tambem deve produzir erro classificado de guardrail, observavel por `Phase = stream` e `Action = abort`.
 - Erro tecnico do guardrail deve falhar o run com erro encapsulado e `EventAgentFailed`.
 - Toda decisao observavel de guardrail deve aparecer em `GuardrailDecision`.
-- Streaming guardrails sobre deltas nao entram na v1 e continuam explicitamente adiados conforme `Spec 010`.
+- Decisoes invalidas de guardrail devem falhar em modo fail-closed.
 
 ## 11. Erros e cancelamento
 
@@ -631,18 +650,21 @@ Os testes minimos obrigatorios para a implementacao futura sao:
 11. Input guardrail com `block`, retornando `ErrGuardrailBlocked`.
 12. Output guardrail com `transform`, alterando a resposta final.
 13. Output guardrail com `block`, impedindo persistencia e sucesso.
-14. Carregamento de memory bem-sucedido antes da primeira chamada ao modelo.
-15. Falha em `memory.Load`, impedindo geracao do modelo.
-16. Falha em `memory.Save` apos resposta gerada, invalidando o run.
-17. `Run` cancelado por `context.Context`, com `errors.Is(err, context.Canceled)`.
-18. `Run` abortado por deadline, com `errors.Is(err, context.DeadlineExceeded)`.
-19. `Stream` com ordem correta de eventos: started -> deltas/tool events/guardrails -> terminal.
-20. Equivalencia entre `Response` de `Run` e `Response` em `EventAgentCompleted`.
-21. `Stream.Close()` idempotente.
-22. Stream abortado nao entrega `EventAgentCompleted`.
-23. Hook recebendo os mesmos eventos, na mesma ordem, que o stream.
-24. Panic em hook sendo recuperado sem derrubar o run.
-25. Uso concorrente do mesmo `Agent` por multiplos runs sem race de configuracao compartilhada.
+14. Stream guardrail com `transform`, alterando `EventAgentDelta` e o buffer efetivo.
+15. Stream guardrail com `drop`, suprimindo apenas o chunk corrente.
+16. Stream guardrail com `abort`, gerando `EventGuardrail`, `EventAgentFailed` e sem `EventAgentCompleted`.
+17. Carregamento de memory bem-sucedido antes da primeira chamada ao modelo.
+18. Falha em `memory.Load`, impedindo geracao do modelo.
+19. Falha em `memory.Save` apos resposta gerada, invalidando o run.
+20. `Run` cancelado por `context.Context`, com `errors.Is(err, context.Canceled)`.
+21. `Run` abortado por deadline, com `errors.Is(err, context.DeadlineExceeded)`.
+22. `Stream` com ordem correta de eventos: started -> deltas/tool events/guardrails -> terminal.
+23. Equivalencia entre `Response` de `Run` e `Response` em `EventAgentCompleted` quando nao houver transformacoes exclusivas do caminho de stream.
+24. `Stream.Close()` idempotente.
+25. Stream abortado pelo consumidor nao entrega `EventAgentCompleted`.
+26. Hook recebendo os mesmos eventos, na mesma ordem, que o stream.
+27. Panic em hook sendo recuperado sem derrubar o run.
+28. Uso concorrente do mesmo `Agent` por multiplos runs sem race de configuracao compartilhada.
 
 ## 15. Questoes em aberto
 

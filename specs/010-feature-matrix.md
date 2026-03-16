@@ -51,9 +51,9 @@ Os status usados nesta matriz sao:
 | Memory | Abstracao de memoria de mais longa duracao ou compartilhada entre execucoes. | Sim | P1 | `memory` | Parcial | Alto | Contratos publicos, provider in-memory e integracao plugavel no runtime do agent agora existem; backend persistente e suites de paridade mais amplas continuam pendentes. |
 | Working memory | Estado temporario de execucao para uma conversa, turno ou workflow. | Sim | P1 | `memory/working` | Parcial | Medio | Working memory publica efemera por run agora existe em `pkg/memory` e participa dos defaults do `Agent` e do `App`; customizacao avancada e cobertura de workflow continuam pendentes. |
 | Conversation persistence | Persistencia de historico e contexto conversacional entre execucoes. | Sim | P1 | `persistence/conversation` | Nao iniciado | Alto | V1 deve limitar-se a persistencia local ou plugavel, sem dependencia de plataforma hospedada. |
-| Guardrails de input | Validacao, bloqueio ou saneamento antes da execucao principal. | Sim | P1 | `guardrail` | Parcial | Medio | Ordem, allow, block e transform basicos ja existem no agent runtime; guardrails de streaming e maior riqueza semantica seguem pendentes. |
-| Guardrails de output | Validacao, bloqueio ou transformacao antes da resposta final. | Sim | P1 | `guardrail` | Parcial | Medio | Transformacao e bloqueio basicos ja existem antes da persistencia; suites de paridade completas ainda faltam. |
-| Guardrails de streaming | Interceptacao e controle de eventos parciais durante streaming. | Nao | P2 | `guardrail/stream` | Adiado | Alto | Streaming aumenta a complexidade de paridade e nao deve bloquear a v1. |
+| Guardrails de input | Validacao, bloqueio ou saneamento antes da execucao principal. | Sim | P1 | `guardrail` | Parcial | Medio | Ordem, allow, block e transform encadeados agora existem no runtime do agent; suites de paridade mais amplas ainda faltam. |
+| Guardrails de output | Validacao, bloqueio ou transformacao antes da resposta final. | Sim | P1 | `guardrail` | Parcial | Medio | Transformacao e bloqueio basicos agora cobrem tambem a reconciliacao com o buffer aprovado do stream; suites de paridade completas ainda faltam. |
+| Guardrails de streaming | Interceptacao e controle de eventos parciais durante streaming. | Nao | P2 | `guardrail/stream` | Parcial | Alto | A biblioteca agora suporta `allow`, `transform`, `drop` e `abort`, com heranca via `App` e buffer efetivo; a feature continua opcional para a v1 e pode evoluir em suites de conformidade futuras. |
 | Workflow chain | Encadeamento sequencial de etapas com passagem de contexto e resultados. | Sim | P0 | `workflow` | Nao iniciado | Medio | Equivale ao fluxo sequencial do core; ordem de etapas e propagacao de erro devem ser identicas. |
 | Workflow branching | Desvio condicional entre caminhos alternativos de workflow. | Sim | P1 | `workflow` | Nao iniciado | Medio | A API pode usar funcoes ou structs, mas a decisao e as transicoes precisam ser testaveis. |
 | Workflow retry | Politica de repeticao para etapas falhas com limites e estrategia. | Sim | P1 | `workflow/retry` | Nao iniciado | Medio | Deve definir semantica de erro, backoff e idempotencia esperada. |
@@ -89,7 +89,7 @@ Riscos tecnicos que merecem vigilancia especial:
 3. Workflows completos: `Workflow branching`, `Workflow retry`, `Workflow hooks` e `Workflow execution history`.
 4. Estado e continuidade: `Working memory`, `Memory` e `Conversation persistence`.
 5. Confiabilidade e instrumentacao: `Guardrails de input`, `Guardrails de output` e `Observability hooks locais`.
-6. Expansoes apos estabilizacao da v1: promocao publica de `Reasoning tools`, `Guardrails de streaming`, `HTTP server abstraction`, `Serverless abstraction` e `Triggers/extensibility`.
+6. Expansoes apos estabilizacao da v1: promocao publica de `Reasoning tools`, `HTTP server abstraction`, `Serverless abstraction` e `Triggers/extensibility`.
 
 ## 6. Criterios de pronto por feature
 

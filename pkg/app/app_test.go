@@ -9,6 +9,7 @@ import (
 
 	"github.com/luanlima/gaal-lib/pkg/agent"
 	"github.com/luanlima/gaal-lib/pkg/app"
+	"github.com/luanlima/gaal-lib/pkg/guardrail"
 	"github.com/luanlima/gaal-lib/pkg/memory"
 	"github.com/luanlima/gaal-lib/pkg/types"
 	"github.com/luanlima/gaal-lib/pkg/workflow"
@@ -222,6 +223,93 @@ func TestAgentFactoryLocalMemoryOverridesAppDefaults(t *testing.T) {
 	}
 }
 
+func TestAgentFactoryInheritsAppStreamGuardrails(t *testing.T) {
+	t.Parallel()
+
+	global := namedStreamGuardrail{name: "global-stream"}
+	factory := &memoryAwareAgentFactory{name: "inherit-stream"}
+	instance, err := app.New(
+		app.Config{
+			Name: "inherit-stream-app",
+			Defaults: app.Defaults{
+				Agent: app.AgentDefaults{
+					StreamGuardrails: []guardrail.Stream{global},
+				},
+			},
+		},
+		app.WithAgentFactories(factory),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := instance.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	resolved, err := instance.Runtime().ResolveAgent("inherit-stream")
+	if err != nil {
+		t.Fatalf("ResolveAgent() error = %v", err)
+	}
+
+	if got := len(factory.seenDefaults.StreamGuardrails); got != 1 {
+		t.Fatalf("seen default stream guardrails = %d want 1", got)
+	}
+	if got := len(resolved.Definition().StreamGuardrails); got != 1 {
+		t.Fatalf("resolved stream guardrails = %d want 1", got)
+	}
+	if _, ok := resolved.Definition().StreamGuardrails[0].(namedStreamGuardrail); !ok {
+		t.Fatalf("resolved stream guardrail type = %T", resolved.Definition().StreamGuardrails[0])
+	}
+}
+
+func TestAgentFactoryAppStreamGuardrailsPrecedeLocalOnes(t *testing.T) {
+	t.Parallel()
+
+	global := namedStreamGuardrail{name: "global-stream"}
+	local := namedStreamGuardrail{name: "local-stream"}
+	factory := &memoryAwareAgentFactory{
+		name:             "override-stream",
+		localStreamRules: []guardrail.Stream{local},
+	}
+
+	instance, err := app.New(
+		app.Config{
+			Name: "override-stream-app",
+			Defaults: app.Defaults{
+				Agent: app.AgentDefaults{
+					StreamGuardrails: []guardrail.Stream{global},
+				},
+			},
+		},
+		app.WithAgentFactories(factory),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := instance.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	resolved, err := instance.Runtime().ResolveAgent("override-stream")
+	if err != nil {
+		t.Fatalf("ResolveAgent() error = %v", err)
+	}
+
+	streamGuardrails := resolved.Definition().StreamGuardrails
+	if got := len(streamGuardrails); got != 2 {
+		t.Fatalf("resolved stream guardrails = %d want 2", got)
+	}
+	gotNames := []string{
+		streamGuardrails[0].(namedStreamGuardrail).name,
+		streamGuardrails[1].(namedStreamGuardrail).name,
+	}
+	if !reflect.DeepEqual(gotNames, []string{"global-stream", "local-stream"}) {
+		t.Fatalf("stream guardrail order = %v", gotNames)
+	}
+}
+
 func TestReadyAgentIsNotMutatedByDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -360,6 +448,18 @@ func (f recordingAgentFactory) Build(ctx context.Context, defaults app.AgentDefa
 	if len(defaults.Metadata) > 0 {
 		opts = append(opts, agent.WithMetadata(defaults.Metadata))
 	}
+	if len(defaults.InputGuardrails) > 0 {
+		opts = append(opts, agent.WithInputGuardrails(defaults.InputGuardrails...))
+	}
+	if len(defaults.StreamGuardrails) > 0 {
+		opts = append(opts, agent.WithStreamGuardrails(defaults.StreamGuardrails...))
+	}
+	if len(defaults.OutputGuardrails) > 0 {
+		opts = append(opts, agent.WithOutputGuardrails(defaults.OutputGuardrails...))
+	}
+	if len(defaults.Hooks) > 0 {
+		opts = append(opts, agent.WithHooks(defaults.Hooks...))
+	}
 
 	return agent.New(agent.Config{Name: f.name, Model: appStubModel{}}, opts...)
 }
@@ -368,6 +468,7 @@ type memoryAwareAgentFactory struct {
 	name                string
 	localStore          memory.Store
 	localWorkingFactory memory.WorkingMemoryFactory
+	localStreamRules    []guardrail.Stream
 	seenDefaults        app.AgentDefaults
 }
 
@@ -398,6 +499,21 @@ func (f *memoryAwareAgentFactory) Build(_ context.Context, defaults app.AgentDef
 		opts = append(opts, agent.WithWorkingMemory(f.localWorkingFactory))
 	case defaults.WorkingMemory != nil:
 		opts = append(opts, agent.WithWorkingMemory(defaults.WorkingMemory))
+	}
+	if len(defaults.InputGuardrails) > 0 {
+		opts = append(opts, agent.WithInputGuardrails(defaults.InputGuardrails...))
+	}
+	if len(defaults.StreamGuardrails) > 0 {
+		opts = append(opts, agent.WithStreamGuardrails(defaults.StreamGuardrails...))
+	}
+	if len(f.localStreamRules) > 0 {
+		opts = append(opts, agent.WithStreamGuardrails(f.localStreamRules...))
+	}
+	if len(defaults.OutputGuardrails) > 0 {
+		opts = append(opts, agent.WithOutputGuardrails(defaults.OutputGuardrails...))
+	}
+	if len(defaults.Hooks) > 0 {
+		opts = append(opts, agent.WithHooks(defaults.Hooks...))
 	}
 
 	return agent.New(agent.Config{Name: f.name, Model: appStubModel{}}, opts...)
@@ -462,4 +578,12 @@ type countingAppWorkingMemoryFactory struct {
 func (f *countingAppWorkingMemoryFactory) NewRunState(ctx context.Context, agentID, runID string) (memory.WorkingSet, error) {
 	f.calls++
 	return memory.InMemoryWorkingMemoryFactory{}.NewRunState(ctx, agentID, runID)
+}
+
+type namedStreamGuardrail struct {
+	name string
+}
+
+func (g namedStreamGuardrail) CheckStream(context.Context, guardrail.StreamRequest) (guardrail.Decision, error) {
+	return guardrail.Decision{Name: g.name, Action: guardrail.ActionAllow}, nil
 }
