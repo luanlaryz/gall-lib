@@ -191,7 +191,7 @@ func (e *engine) execute(
 			ToolCalls: toTypesToolCalls(modelToolCalls),
 		})
 
-		for _, modelToolCall := range modelToolCalls {
+		for index, modelToolCall := range modelToolCalls {
 			if err := checkCanceled(ctx, "tool.call", definition.Descriptor.ID, req.RunID); err != nil {
 				return agent.Response{}, emitter.fail(ctx, err)
 			}
@@ -202,10 +202,16 @@ func (e *engine) execute(
 				return agent.Response{}, emitter.fail(ctx, classifyError("tool.resolve", definition.Descriptor.ID, req.RunID, toolErr, agent.ErrorKindTool))
 			}
 
+			toolDescriptor := tool.DescriptorOf(selectedTool)
+			callID := modelToolCall.ID
+			if callID == "" {
+				callID = newToolCallID(req.RunID, step, index)
+			}
+
 			toolUsed = true
 			callRecord := agent.ToolCallRecord{
-				ID:    modelToolCall.ID,
-				Name:  modelToolCall.Name,
+				ID:    callID,
+				Name:  toolDescriptor.Name,
 				Input: cloneMap(modelToolCall.Input),
 			}
 
@@ -217,10 +223,12 @@ func (e *engine) execute(
 			})
 
 			startedAt := time.Now()
-			result, toolErr := selectedTool.Call(ctx, tool.Call{
-				ID:        modelToolCall.ID,
+			result, toolErr := tool.Invoke(ctx, selectedTool, tool.Call{
+				ID:        callID,
+				ToolName:  toolDescriptor.Name,
 				RunID:     req.RunID,
 				SessionID: req.SessionID,
+				AgentID:   definition.Descriptor.ID,
 				Input:     cloneMap(modelToolCall.Input),
 				Metadata:  types.CloneMetadata(req.Metadata),
 			})
@@ -250,9 +258,9 @@ func (e *engine) execute(
 
 			working.AddRecord(memory.Record{
 				Kind: "tool_call",
-				Name: modelToolCall.Name,
+				Name: callRecord.Name,
 				Data: map[string]any{
-					"call_id": modelToolCall.ID,
+					"call_id": callRecord.ID,
 					"input":   cloneMap(modelToolCall.Input),
 					"output":  cloneToolResult(result),
 				},
@@ -260,8 +268,8 @@ func (e *engine) execute(
 
 			toolMessage := types.Message{
 				Role:       types.RoleTool,
-				Name:       modelToolCall.Name,
-				ToolCallID: modelToolCall.ID,
+				Name:       callRecord.Name,
+				ToolCallID: callRecord.ID,
 				Content:    toolResultContent(result),
 				Metadata:   types.CloneMetadata(result.Metadata),
 			}
@@ -629,12 +637,13 @@ func filterTools(registered []tool.Tool, req agent.Request) map[string]tool.Tool
 
 	out := make(map[string]tool.Tool, len(registered))
 	for _, registeredTool := range registered {
+		descriptor := tool.DescriptorOf(registeredTool)
 		if len(allowed) > 0 {
-			if _, ok := allowed[registeredTool.Name()]; !ok {
+			if _, ok := allowed[descriptor.Name]; !ok {
 				continue
 			}
 		}
-		out[registeredTool.Name()] = registeredTool
+		out[descriptor.Name] = registeredTool
 	}
 	return out
 }
@@ -653,9 +662,10 @@ func buildToolSpecs(registered map[string]tool.Tool) []agent.ToolSpec {
 	out := make([]agent.ToolSpec, 0, len(registered))
 	for _, name := range names {
 		registeredTool := registered[name]
+		descriptor := tool.DescriptorOf(registeredTool)
 		out = append(out, agent.ToolSpec{
-			Name:        registeredTool.Name(),
-			Description: registeredTool.Description(),
+			Name:        descriptor.Name,
+			Description: descriptor.Description,
 		})
 	}
 	return out
@@ -692,7 +702,7 @@ func cloneMap(in map[string]any) map[string]any {
 
 	out := make(map[string]any, len(in))
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneValue(value)
 	}
 	return out
 }
@@ -744,8 +754,8 @@ func cloneGuardrailDecisions(in []agent.GuardrailDecision) []agent.GuardrailDeci
 
 func cloneToolResult(result tool.Result) tool.Result {
 	return tool.Result{
+		Value:    cloneValue(result.Value),
 		Content:  result.Content,
-		Data:     cloneMap(result.Data),
 		Metadata: types.CloneMetadata(result.Metadata),
 	}
 }
@@ -754,13 +764,13 @@ func toolResultContent(result tool.Result) string {
 	if result.Content != "" {
 		return result.Content
 	}
-	if len(result.Data) == 0 {
+	if result.Value == nil {
 		return ""
 	}
 
-	raw, err := json.Marshal(result.Data)
+	raw, err := json.Marshal(result.Value)
 	if err != nil {
-		return fmt.Sprintf("%v", result.Data)
+		return fmt.Sprintf("%v", result.Value)
 	}
 	return string(raw)
 }
@@ -795,4 +805,34 @@ func toTypesToolCalls(calls []agent.ModelToolCall) []types.ToolCall {
 		}
 	}
 	return out
+}
+
+func cloneSlice(in []any) []any {
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make([]any, len(in))
+	for index, value := range in {
+		out[index] = cloneValue(value)
+	}
+	return out
+}
+
+func cloneValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return cloneMap(value)
+	case []any:
+		return cloneSlice(value)
+	default:
+		return value
+	}
+}
+
+func newToolCallID(runID string, step, index int) string {
+	if runID == "" {
+		return fmt.Sprintf("tool-call-%d-%d", step+1, index+1)
+	}
+	return fmt.Sprintf("%s-tool-%d-%d", runID, step+1, index+1)
 }

@@ -92,10 +92,13 @@ func TestRunWithToolCallFeedsNextModelStep(t *testing.T) {
 		agent.Config{Name: "tool-agent", Model: model},
 		agent.WithExecutionEngine(coreruntime.NewEngine()),
 		agent.WithTools(stubTool{name: "search", call: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			if call.ToolName != "search" {
+				t.Fatalf("tool name = %q want %q", call.ToolName, "search")
+			}
 			if call.Input["query"] != "golang" {
 				t.Fatalf("tool input = %v", call.Input)
 			}
-			return tool.Result{Content: "result: golang"}, nil
+			return tool.Result{Value: "result: golang", Content: "result: golang"}, nil
 		}}),
 	)
 	if err != nil {
@@ -278,12 +281,20 @@ type stubTool struct {
 
 func (t stubTool) Name() string        { return t.name }
 func (t stubTool) Description() string { return t.name }
-func (t stubTool) Schema() tool.Schema { return tool.Schema{Type: "object"} }
+func (t stubTool) InputSchema() tool.Schema {
+	return tool.Schema{
+		Type: "object",
+		Properties: map[string]tool.Schema{
+			"query": {Type: "string"},
+		},
+	}
+}
+func (t stubTool) OutputSchema() tool.Schema { return tool.Schema{Type: "string"} }
 func (t stubTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if t.call != nil {
 		return t.call(ctx, call)
 	}
-	return tool.Result{Content: "ok"}, nil
+	return tool.Result{Value: "ok", Content: "ok"}, nil
 }
 
 type blockingInputGuardrail struct{}

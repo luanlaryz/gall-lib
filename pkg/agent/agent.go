@@ -112,23 +112,18 @@ func New(cfg Config, opts ...Option) (*Agent, error) {
 		maxSteps = resolved.maxSteps
 	}
 
-	toolsByName := make(map[string]struct{}, len(resolved.tools))
+	toolRegistry := tool.NewRegistry()
+	if err := toolRegistry.Register(resolved.tools...); err != nil {
+		return nil, newError(ErrorKindInvalidConfig, "new", "", "", err)
+	}
+
 	clonedTools := make([]tool.Tool, 0, len(resolved.tools))
 	for _, registeredTool := range resolved.tools {
-		if registeredTool == nil {
-			return nil, newError(ErrorKindInvalidConfig, "new", "", "", fmt.Errorf("%w: tool cannot be nil", ErrInvalidConfig))
+		frozenTool, err := toolRegistry.Resolve(tool.DescriptorOf(registeredTool).Name)
+		if err != nil {
+			return nil, newError(ErrorKindInvalidConfig, "new", "", "", err)
 		}
-
-		name := strings.TrimSpace(registeredTool.Name())
-		if name == "" {
-			return nil, newError(ErrorKindInvalidConfig, "new", "", "", fmt.Errorf("%w: tool name is required", ErrInvalidConfig))
-		}
-		if _, exists := toolsByName[name]; exists {
-			return nil, newError(ErrorKindInvalidConfig, "new", "", "", fmt.Errorf("%w: duplicate tool %q", ErrInvalidConfig, name))
-		}
-
-		toolsByName[name] = struct{}{}
-		clonedTools = append(clonedTools, registeredTool)
+		clonedTools = append(clonedTools, frozenTool)
 	}
 
 	agentID := normalizeID(cfg.Name)
@@ -585,7 +580,7 @@ func (a *Agent) normalizeRequest(op string, ctx context.Context, req Request) (R
 
 func (a *Agent) hasTool(name string) bool {
 	for _, registeredTool := range a.tools {
-		if registeredTool.Name() == name {
+		if tool.DescriptorOf(registeredTool).Name == name {
 			return true
 		}
 	}
