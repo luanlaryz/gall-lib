@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Go build artifacts
+bin/
+dist/
+coverage.out
+coverage.html
+
+# Editor directories
+.idea/
+.vscode/

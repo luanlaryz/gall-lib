@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fmt check
+        run: make fmt-check
+
+      - name: Go test
+        run: make test
+
+      - name: Race
+        run: make race
+
+      - name: Lint placeholder
+        run: make lint
