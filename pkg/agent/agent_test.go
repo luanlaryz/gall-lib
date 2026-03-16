@@ -73,6 +73,22 @@ func TestRunSuccess(t *testing.T) {
 	}
 }
 
+func TestNewUsesInMemoryWorkingMemoryByDefault(t *testing.T) {
+	t.Parallel()
+
+	ag, err := agent.New(
+		agent.Config{Name: "default-working-memory", Model: stubModel{}},
+		agent.WithExecutionEngine(coreruntime.NewEngine()),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if _, ok := ag.Definition().WorkingMemory.(memory.InMemoryWorkingMemoryFactory); !ok {
+		t.Fatalf("Definition().WorkingMemory = %T want %T", ag.Definition().WorkingMemory, memory.InMemoryWorkingMemoryFactory{})
+	}
+}
+
 func TestRunWithToolCallFeedsNextModelStep(t *testing.T) {
 	t.Parallel()
 

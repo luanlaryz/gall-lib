@@ -61,6 +61,12 @@ func (greeterFactory) Build(ctx context.Context, defaults app.AgentDefaults) (*a
 	if len(defaults.Metadata) > 0 {
 		opts = append(opts, agent.WithMetadata(defaults.Metadata))
 	}
+	if defaults.Memory != nil {
+		opts = append(opts, agent.WithMemory(defaults.Memory))
+	}
+	if defaults.WorkingMemory != nil {
+		opts = append(opts, agent.WithWorkingMemory(defaults.WorkingMemory))
+	}
 
 	return agent.New(
 		agent.Config{

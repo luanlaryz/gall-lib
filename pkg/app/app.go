@@ -1042,8 +1042,9 @@ func builtinDefaults() Defaults {
 		Logger:          logger.Nop(),
 		ShutdownTimeout: defaultShutdownTimeout,
 		Agent: AgentDefaults{
-			MaxSteps: agent.DefaultMaxSteps,
-			Engine:   coreruntime.NewEngine(),
+			MaxSteps:      agent.DefaultMaxSteps,
+			Engine:        coreruntime.NewEngine(),
+			WorkingMemory: memory.InMemoryWorkingMemoryFactory{},
 		},
 	}
 }

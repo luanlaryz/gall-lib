@@ -7,7 +7,6 @@ import (
 	"io"
 	"regexp"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -140,7 +139,7 @@ func New(cfg Config, opts ...Option) (*Agent, error) {
 
 	workingFactory := resolved.workingMemory
 	if workingFactory == nil {
-		workingFactory = defaultWorkingMemoryFactory{}
+		workingFactory = memory.InMemoryWorkingMemoryFactory{}
 	}
 
 	return &Agent{
@@ -624,62 +623,6 @@ func newError(kind ErrorKind, op, agentID, runID string, cause error) *Error {
 		RunID:   runID,
 		Cause:   cause,
 	}
-}
-
-type defaultWorkingMemoryFactory struct{}
-
-func (defaultWorkingMemoryFactory) NewRunState(context.Context, string, string) (memory.WorkingSet, error) {
-	return &defaultWorkingSet{}, nil
-}
-
-type defaultWorkingSet struct {
-	mu       sync.Mutex
-	messages []types.Message
-	records  []memory.Record
-}
-
-func (w *defaultWorkingSet) AddMessage(msg types.Message) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.messages = append(w.messages, types.CloneMessage(msg))
-}
-
-func (w *defaultWorkingSet) AddRecord(record memory.Record) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.records = append(w.records, cloneRecord(record))
-}
-
-func (w *defaultWorkingSet) Snapshot() memory.Snapshot {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	out := memory.Snapshot{
-		Messages: types.CloneMessages(w.messages),
-	}
-	if len(w.records) > 0 {
-		out.Records = make([]memory.Record, len(w.records))
-		for index, record := range w.records {
-			out.Records[index] = cloneRecord(record)
-		}
-	}
-	return out
-}
-
-func cloneRecord(record memory.Record) memory.Record {
-	out := memory.Record{
-		Kind: record.Kind,
-		Name: record.Name,
-	}
-	if len(record.Data) > 0 {
-		out.Data = make(map[string]any, len(record.Data))
-		for key, value := range record.Data {
-			out.Data[key] = value
-		}
-	}
-	return out
 }
 
 var _ Stream = (*streamClosed)(nil)
