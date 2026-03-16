@@ -424,6 +424,65 @@ func TestResolveWorkflowReturnsReadyWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflowFactoryInheritsAppWorkflowDefaults(t *testing.T) {
+	t.Parallel()
+
+	history := &workflow.InMemoryHistory{}
+	var seenEvents []workflow.EventType
+	hook := workflow.HookFunc(func(ctx context.Context, event workflow.Event) {
+		seenEvents = append(seenEvents, event.Type)
+	})
+	factory := &workflowAwareFactory{name: "flow"}
+
+	instance, err := app.New(
+		app.Config{
+			Name: "workflow-defaults-app",
+			Defaults: app.Defaults{
+				Workflow: app.WorkflowDefaults{
+					Metadata: types.Metadata{"source": "app-default"},
+					Hooks:    []workflow.Hook{hook},
+					History:  history,
+					Retry:    workflow.FixedRetryPolicy{MaxRetries: 1},
+				},
+			},
+		},
+		app.WithWorkflowFactories(factory),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := instance.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	resolved, err := instance.Runtime().ResolveWorkflow("flow")
+	if err != nil {
+		t.Fatalf("ResolveWorkflow() error = %v", err)
+	}
+
+	resp, err := resolved.Run(context.Background(), workflow.Request{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if factory.seenDefaults.History == nil {
+		t.Fatal("expected workflow history default")
+	}
+	if factory.seenDefaults.Retry == nil {
+		t.Fatal("expected workflow retry default")
+	}
+	if got := resp.Metadata["source"]; got != "app-default" {
+		t.Fatalf("Response.Metadata[source] = %q want %q", got, "app-default")
+	}
+	if len(history.Entries()) == 0 {
+		t.Fatal("expected workflow history entries")
+	}
+	if len(seenEvents) == 0 || seenEvents[0] != workflow.EventWorkflowStarted {
+		t.Fatalf("workflow hook events = %v", seenEvents)
+	}
+}
+
 type recordingAgentFactory struct {
 	name       string
 	buildOrder *[]string
@@ -554,6 +613,34 @@ func (w stubWorkflow) Name() string {
 
 func (stubWorkflow) Run(context.Context, workflow.Request) (workflow.Response, error) {
 	return workflow.Response{}, nil
+}
+
+type workflowAwareFactory struct {
+	name         string
+	seenDefaults app.WorkflowDefaults
+}
+
+func (f *workflowAwareFactory) Name() string {
+	return f.name
+}
+
+func (f *workflowAwareFactory) Build(ctx context.Context, defaults app.WorkflowDefaults) (workflow.Workflow, error) {
+	f.seenDefaults = defaults
+
+	builder := workflow.NewBuilder(f.name).WithMetadata(defaults.Metadata)
+	if len(defaults.Hooks) > 0 {
+		builder = builder.WithHooks(defaults.Hooks...)
+	}
+	if defaults.History != nil {
+		builder = builder.WithHistory(defaults.History)
+	}
+	if defaults.Retry != nil {
+		builder = builder.WithRetry(defaults.Retry)
+	}
+
+	return builder.Step(workflow.Action("one", func(ctx context.Context, stepCtx workflow.StepContext) (workflow.StepResult, error) {
+		return workflow.StepResult{Output: map[string]any{"ok": true}}, nil
+	})).Build()
 }
 
 type countingAppMemoryStore struct {
