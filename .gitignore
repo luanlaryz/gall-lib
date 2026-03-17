@@ -7,6 +7,9 @@ dist/
 coverage.out
 coverage.html
 
+# Compiled binaries (output of go build without -o flag)
+/demo-app
+
 # Editor directories
 .idea/
 .vscode/

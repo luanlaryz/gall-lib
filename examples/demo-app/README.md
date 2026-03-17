@@ -121,6 +121,6 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 ## Lacunas conhecidas
 
 - o modelo da demo e fake e deterministico; ele existe para smoke test local, nao para provar provider real
-- a memoria e apenas in-process via `memory.InMemoryStore`
+- a memoria e apenas in-process via `memory.InMemoryStore`; reiniciar o processo limpa todo o estado conversacional
 - o streaming HTTP usa um adapter SSE minimo da demo, sem promover um helper HTTP generico novo em `pkg/server`
 - nao ha autenticacao, rate limit nem OpenAPI formal nesta entrega
