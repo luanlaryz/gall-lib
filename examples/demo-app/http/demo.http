@@ -1,0 +1,57 @@
+@baseUrl = http://127.0.0.1:8080
+@agentName = demo-agent
+
+###
+# Health
+GET {{baseUrl}}/healthz
+
+###
+# Readiness
+GET {{baseUrl}}/readyz
+
+###
+# Agents
+GET {{baseUrl}}/agents
+
+###
+# Text run
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-1",
+  "message": "Ada",
+  "metadata": {
+    "user_id": "user-1",
+    "conversation_id": "conv-1"
+  }
+}
+
+###
+# Text run again with same session to show in-memory continuity
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-1",
+  "message": "Ada",
+  "metadata": {
+    "user_id": "user-1",
+    "conversation_id": "conv-1"
+  }
+}
+
+###
+# Stream with SSE
+POST {{baseUrl}}/agents/{{agentName}}/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "session_id": "session-stream-1",
+  "message": "Grace",
+  "metadata": {
+    "user_id": "user-1",
+    "conversation_id": "conv-stream-1"
+  }
+}
