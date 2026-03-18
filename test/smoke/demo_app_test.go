@@ -163,6 +163,46 @@ func TestDemoApp(t *testing.T) {
 			t.Fatalf("Allow = %q want POST", allow)
 		}
 	})
+
+	t.Run("stream_agent_not_found_404", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/missing-agent/stream", runRequest{
+			SessionID: "s1",
+			Message:   "hi",
+		})
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d want 404", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("stream_invalid_request_400", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "",
+			Message:   "hi",
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d want 400", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("stream_method_not_allowed_405", func(t *testing.T) {
+		resp, err := client.Get(baseURL + "/agents/demo-agent/stream")
+		if err != nil {
+			t.Fatalf("GET error: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d want 405", resp.StatusCode)
+		}
+		if allow := resp.Header.Get("Allow"); allow != "POST" {
+			t.Fatalf("Allow = %q want POST", allow)
+		}
+	})
 }
 
 func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
