@@ -55,3 +55,44 @@ Accept: text/event-stream
     "conversation_id": "conv-stream-1"
   }
 }
+
+###
+# Tool call: get_time
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-tool-1",
+  "message": "what time is it?"
+}
+
+###
+# Tool call: calculate_sum
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-tool-2",
+  "message": "sum 3 and 7"
+}
+
+###
+# Tool error: unknown tool
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-tool-err",
+  "message": "use unknown_tool please"
+}
+
+###
+# Tool call via streaming
+POST {{baseUrl}}/agents/{{agentName}}/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "session_id": "session-tool-stream",
+  "message": "what time is it?"
+}

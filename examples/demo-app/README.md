@@ -7,6 +7,7 @@ Esta demo executavel prova o fluxo base local da `gaal-lib` com:
 - `pkg/server`
 - `pkg/logger`
 - `pkg/memory`
+- `pkg/tool`
 
 Ela foi desenhada para ser simples, didatica e local. Nao depende de VoltOps, nao usa provider remoto e sobe com um unico comando.
 
@@ -36,6 +37,17 @@ Por default, ela escuta em `127.0.0.1:8080`.
 - `GET /agents`: lista os agents registrados
 - `POST /agents/{name}/runs`: execucao textual sincrona
 - `POST /agents/{name}/stream`: streaming SSE
+
+## Tools registradas
+
+O agent da demo registra 2 tools deterministicas:
+
+- `get_time`: retorna a data/hora UTC atual em formato RFC3339. Acionada por mensagens contendo "time" ou "hora".
+- `calculate_sum`: soma dois numeros. Acionada por mensagens contendo "sum" ou "soma" seguido de dois numeros.
+
+O modelo fake da demo detecta keywords na mensagem do usuario e simula tool calls. O runtime do engine executa a tool real e re-alimenta o resultado na conversa antes de gerar a resposta final.
+
+Para provocar um erro de tool, envie uma mensagem contendo "use unknown_tool". O engine tentara resolver uma tool inexistente e retornara erro observavel.
 
 ## Exemplos com curl
 
@@ -102,6 +114,50 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
   }'
 ```
 
+Tool call (get_time):
+
+```bash
+curl -X POST http://127.0.0.1:8080/agents/demo-agent/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-tool-1",
+    "message": "what time is it?"
+  }'
+```
+
+Tool call (calculate_sum):
+
+```bash
+curl -X POST http://127.0.0.1:8080/agents/demo-agent/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-tool-2",
+    "message": "sum 3 and 7"
+  }'
+```
+
+Tool error (unknown tool):
+
+```bash
+curl -X POST http://127.0.0.1:8080/agents/demo-agent/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-tool-err",
+    "message": "use unknown_tool please"
+  }'
+```
+
+Tool call via streaming:
+
+```bash
+curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-tool-stream",
+    "message": "what time is it?"
+  }'
+```
+
 ## Smoke manual
 
 1. Suba a demo com `go run ./cmd/demo-app`.
@@ -111,6 +167,10 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 5. Execute `POST /agents/demo-agent/runs` e confirme uma resposta textual.
 6. Repita a mesma chamada com o mesmo `session_id` e confirme a resposta de retorno de memoria.
 7. Execute `POST /agents/demo-agent/stream` com `curl -N` e observe eventos `agent.started`, `agent.delta` e `agent.completed`.
+8. Execute `POST /agents/demo-agent/runs` com `"message": "what time is it?"` e confirme `tool_calls` na resposta e output com hora UTC.
+9. Execute `POST /agents/demo-agent/runs` com `"message": "sum 3 and 7"` e confirme output contendo "10".
+10. Execute `POST /agents/demo-agent/runs` com `"message": "use unknown_tool please"` e confirme erro de tool na resposta.
+11. Execute `POST /agents/demo-agent/stream` com `"message": "what time is it?"` e observe eventos `agent.tool_call` e `agent.tool_result` no SSE.
 
 ## Arquivos uteis
 
@@ -121,6 +181,10 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 ## Lacunas conhecidas
 
 - o modelo da demo e fake e deterministico; ele existe para smoke test local, nao para provar provider real
+- a heuristica de tool call e baseada em keywords na mensagem do usuario, nao em raciocinio real do modelo
 - a memoria e apenas in-process via `memory.InMemoryStore`; reiniciar o processo limpa todo o estado conversacional
 - o streaming HTTP usa um adapter SSE minimo da demo, sem promover um helper HTTP generico novo em `pkg/server`
+- nao ha tool calls paralelas nem workflows multi-step complexos
+- o erro de tool e provocado por tool desconhecida, nao por falha real de execucao
+- nao ha toolkit na demo; tools sao registradas individualmente
 - nao ha autenticacao, rate limit nem OpenAPI formal nesta entrega

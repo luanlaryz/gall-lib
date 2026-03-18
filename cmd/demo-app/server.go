@@ -121,12 +121,20 @@ type runRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
+type toolCallResponse struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Input  map[string]any `json:"input,omitempty"`
+	Output string         `json:"output,omitempty"`
+}
+
 type runResponse struct {
-	RunID     string            `json:"run_id"`
-	AgentID   string            `json:"agent_id"`
-	SessionID string            `json:"session_id"`
-	Output    string            `json:"output"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	RunID     string             `json:"run_id"`
+	AgentID   string             `json:"agent_id"`
+	SessionID string             `json:"session_id"`
+	Output    string             `json:"output"`
+	ToolCalls []toolCallResponse `json:"tool_calls,omitempty"`
+	Metadata  map[string]string  `json:"metadata,omitempty"`
 }
 
 type errorResponse struct {
@@ -134,15 +142,20 @@ type errorResponse struct {
 }
 
 type streamEvent struct {
-	Sequence  int64             `json:"sequence"`
-	Type      string            `json:"type"`
-	RunID     string            `json:"run_id,omitempty"`
-	AgentID   string            `json:"agent_id,omitempty"`
-	SessionID string            `json:"session_id,omitempty"`
-	Delta     string            `json:"delta,omitempty"`
-	Output    string            `json:"output,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	Sequence   int64             `json:"sequence"`
+	Type       string            `json:"type"`
+	RunID      string            `json:"run_id,omitempty"`
+	AgentID    string            `json:"agent_id,omitempty"`
+	SessionID  string            `json:"session_id,omitempty"`
+	Delta      string            `json:"delta,omitempty"`
+	Output     string            `json:"output,omitempty"`
+	ToolName   string            `json:"tool_name,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	ToolStatus string            `json:"tool_status,omitempty"`
+	ToolInput  map[string]any    `json:"tool_input,omitempty"`
+	ToolOutput string            `json:"tool_output,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 func (s *httpServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -258,11 +271,22 @@ func (s *httpServer) handleRun(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 
+	var calls []toolCallResponse
+	for _, tc := range resp.ToolCalls {
+		calls = append(calls, toolCallResponse{
+			ID:     tc.ID,
+			Name:   tc.Name,
+			Input:  tc.Input,
+			Output: tc.Output.Content,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, runResponse{
 		RunID:     resp.RunID,
 		AgentID:   resp.AgentID,
 		SessionID: resp.SessionID,
 		Output:    resp.Message.Content,
+		ToolCalls: calls,
 		Metadata:  resp.Metadata,
 	})
 }
@@ -339,6 +363,13 @@ func toStreamEvent(event agent.Event) streamEvent {
 	}
 	if event.Delta != nil {
 		out.Delta = event.Delta.Content
+	}
+	if event.ToolCall != nil {
+		out.ToolName = event.ToolCall.Call.Name
+		out.ToolCallID = event.ToolCall.Call.ID
+		out.ToolStatus = string(event.ToolCall.Status)
+		out.ToolInput = event.ToolCall.Call.Input
+		out.ToolOutput = event.ToolCall.Call.Output.Content
 	}
 	if event.Response != nil {
 		out.Output = event.Response.Message.Content

@@ -124,6 +124,80 @@ func TestDemoApp(t *testing.T) {
 		}
 	})
 
+	t.Run("tool_call_get_time", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-time",
+			Message:   "what time is it?",
+		})
+		if !strings.Contains(resp.Output, "the current time is") {
+			t.Fatalf("output = %q, want it to contain 'the current time is'", resp.Output)
+		}
+		if len(resp.ToolCalls) == 0 {
+			t.Fatal("expected at least one tool call in response")
+		}
+		if resp.ToolCalls[0].Name != "get_time" {
+			t.Fatalf("tool_calls[0].name = %q want get_time", resp.ToolCalls[0].Name)
+		}
+	})
+
+	t.Run("tool_call_calculate_sum", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-sum",
+			Message:   "sum 3 and 7",
+		})
+		if !strings.Contains(resp.Output, "10") {
+			t.Fatalf("output = %q, want it to contain '10'", resp.Output)
+		}
+		if len(resp.ToolCalls) == 0 {
+			t.Fatal("expected at least one tool call in response")
+		}
+		if resp.ToolCalls[0].Name != "calculate_sum" {
+			t.Fatalf("tool_calls[0].name = %q want calculate_sum", resp.ToolCalls[0].Name)
+		}
+	})
+
+	t.Run("tool_call_error_unknown_tool", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-err",
+			Message:   "use unknown_tool please",
+		})
+		if status != http.StatusInternalServerError {
+			t.Fatalf("status = %d want 500", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error for unknown tool")
+		}
+	})
+
+	t.Run("tool_call_stream_get_time", func(t *testing.T) {
+		events := postSSE(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "session-tool-stream-time",
+			Message:   "what time is it?",
+		})
+
+		hasToolCall := false
+		hasToolResult := false
+		for _, e := range events {
+			if e.name == "agent.tool_call" {
+				hasToolCall = true
+			}
+			if e.name == "agent.tool_result" {
+				hasToolResult = true
+			}
+		}
+		if !hasToolCall {
+			t.Fatal("no agent.tool_call event found in stream")
+		}
+		if !hasToolResult {
+			t.Fatal("no agent.tool_result event found in stream")
+		}
+
+		last := events[len(events)-1]
+		if last.name != "agent.completed" {
+			t.Fatalf("last event = %q want agent.completed", last.name)
+		}
+	})
+
 	t.Run("agent_not_found_404", func(t *testing.T) {
 		status, _, errResp := postRaw(t, client, baseURL+"/agents/missing-agent/runs", runRequest{
 			SessionID: "s1",
@@ -272,12 +346,20 @@ type runRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
+type toolCallResponse struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Input  map[string]any `json:"input,omitempty"`
+	Output string         `json:"output,omitempty"`
+}
+
 type runResponse struct {
-	RunID     string            `json:"run_id"`
-	AgentID   string            `json:"agent_id"`
-	SessionID string            `json:"session_id"`
-	Output    string            `json:"output"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	RunID     string             `json:"run_id"`
+	AgentID   string             `json:"agent_id"`
+	SessionID string             `json:"session_id"`
+	Output    string             `json:"output"`
+	ToolCalls []toolCallResponse `json:"tool_calls,omitempty"`
+	Metadata  map[string]string  `json:"metadata,omitempty"`
 }
 
 type errorResponse struct {

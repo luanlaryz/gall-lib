@@ -107,6 +107,7 @@
 - Tenant/auth/quota: [`skills/02-tenant-auth-quotas/SKILL.md`](skills/02-tenant-auth-quotas/SKILL.md).
 - ACK assíncrono/use cases de comando: [`skills/03-async-command-processing/SKILL.md`](skills/03-async-command-processing/SKILL.md).
 - SSE/WS/replay por `seq`: [`skills/04-streaming-sse-ws/SKILL.md`](skills/04-streaming-sse-ws/SKILL.md).
+- Refinamento de pedido em spec, arquitetura, decisão entre amend/new spec e geração de prompt para Cursor/Codex: [`skills/05-gaal-spec-architect/SKILL.md`](skills/05-gaal-spec-architect/SKILL.md).
 - Roteamento de provider/model por seller: [`skills/06-multi-provider-model-routing/SKILL.md`](skills/06-multi-provider-model-routing/SKILL.md).
 - Postgres/pgx/migrations: [`skills/07-postgres-pgx-migrate/SKILL.md`](skills/07-postgres-pgx-migrate/SKILL.md).
 - Redis cache/streams/TTL: [`skills/08-redis-cache-streams/SKILL.md`](skills/08-redis-cache-streams/SKILL.md).
