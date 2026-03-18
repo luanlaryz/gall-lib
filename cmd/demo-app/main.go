@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/luanlima/gaal-lib/pkg/app"
+	"github.com/luanlima/gaal-lib/pkg/guardrail"
 	"github.com/luanlima/gaal-lib/pkg/logger"
 	"github.com/luanlima/gaal-lib/pkg/memory"
 	"github.com/luanlima/gaal-lib/pkg/types"
@@ -31,9 +32,12 @@ func main() {
 			Name: cfg.appName,
 			Defaults: app.Defaults{
 				Logger: log,
-				Agent: app.AgentDefaults{
-					Memory: &memory.InMemoryStore{},
-				},
+			Agent: app.AgentDefaults{
+				Memory:           &memory.InMemoryStore{},
+				InputGuardrails:  []guardrail.Input{inputBlockGuardrail{}},
+				StreamGuardrails: []guardrail.Stream{streamDigitGuardrail{}},
+				OutputGuardrails: []guardrail.Output{outputTagGuardrail{}},
+			},
 				Workflow: app.WorkflowDefaults{
 					Metadata: types.Metadata{"demo": "order-processing"},
 					Hooks:    []workflow.Hook{workflow.NewLoggingHook(log)},

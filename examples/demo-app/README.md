@@ -201,6 +201,55 @@ curl -X POST http://127.0.0.1:8080/workflows/order-processing/runs \
   }'
 ```
 
+## Guardrails
+
+A demo registra 3 guardrails como defaults do `App`, herdados automaticamente pelo agent:
+
+### Input guardrail: `inputBlockGuardrail`
+
+Bloqueia qualquer run cuja mensagem do usuario contenha `"BLOCK_ME"`. O run falha com HTTP 422 e erro classificado de guardrail.
+
+```bash
+curl -X POST http://127.0.0.1:8080/agents/demo-agent/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-guardrail-block",
+    "message": "BLOCK_ME"
+  }'
+```
+
+Resultado esperado: HTTP 422 com erro contendo `"guardrail"`.
+
+### Output guardrail: `outputTagGuardrail`
+
+Acrescenta ` [guardrail:ok]` ao final de toda resposta. Toda chamada bem-sucedida tera o sufixo observavel no output.
+
+```bash
+curl -X POST http://127.0.0.1:8080/agents/demo-agent/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-guardrail-tag",
+    "message": "Eve"
+  }'
+```
+
+Resultado esperado: `"output": "hello, Eve [guardrail:ok]"`.
+
+### Stream guardrail: `streamDigitGuardrail`
+
+Substitui digitos `[0-9]` por `*` em cada chunk de stream. Observavel via SSE nos eventos `agent.delta`.
+
+```bash
+curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-guardrail-stream",
+    "message": "test 123"
+  }'
+```
+
+Resultado esperado: deltas contem `***` em vez de `123`, e o output final termina com ` [guardrail:ok]`.
+
 ## Smoke manual
 
 1. Suba a demo com `go run ./cmd/demo-app`.
@@ -217,6 +266,9 @@ curl -X POST http://127.0.0.1:8080/workflows/order-processing/runs \
 12. Chame `GET /workflows` e confirme a presenca do `order-processing`.
 13. Execute `POST /workflows/order-processing/runs` com `"item": "notebook", "amount": 50` e confirme `status: approved`.
 14. Execute `POST /workflows/order-processing/runs` com `"item": "server-rack", "amount": 200` e confirme `status: pending_review`.
+15. Execute `POST /agents/demo-agent/runs` com `"message": "BLOCK_ME"` e confirme HTTP 422 com erro de guardrail.
+16. Execute `POST /agents/demo-agent/runs` com qualquer mensagem e confirme que o output termina com ` [guardrail:ok]`.
+17. Execute `POST /agents/demo-agent/stream` com `"message": "test 123"` e confirme que os deltas tem digitos substituidos por `*`.
 
 ## Arquivos uteis
 

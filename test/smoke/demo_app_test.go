@@ -79,8 +79,8 @@ func TestDemoApp(t *testing.T) {
 			Message:   "Ada",
 			Metadata:  map[string]string{"user_id": "user-1", "conversation_id": "conv-1"},
 		})
-		if first.Output != "hello, Ada" {
-			t.Fatalf("first output = %q want %q", first.Output, "hello, Ada")
+		if first.Output != "hello, Ada [guardrail:ok]" {
+			t.Fatalf("first output = %q want %q", first.Output, "hello, Ada [guardrail:ok]")
 		}
 		if first.AgentID == "" {
 			t.Fatal("first AgentID = empty")
@@ -91,8 +91,8 @@ func TestDemoApp(t *testing.T) {
 			Message:   "Ada",
 			Metadata:  map[string]string{"user_id": "user-1", "conversation_id": "conv-1"},
 		})
-		if second.Output != "welcome back, Ada" {
-			t.Fatalf("second output = %q want %q", second.Output, "welcome back, Ada")
+		if second.Output != "welcome back, Ada [guardrail:ok]" {
+			t.Fatalf("second output = %q want %q", second.Output, "welcome back, Ada [guardrail:ok]")
 		}
 	})
 
@@ -347,6 +347,67 @@ func TestDemoApp(t *testing.T) {
 			t.Fatal("expected non-empty error message")
 		}
 	})
+
+	t.Run("guardrail_input_block", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-guardrail-block",
+			Message:   "BLOCK_ME",
+		})
+		if status != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d want 422", status)
+		}
+		if !strings.Contains(errResp.Error, "guardrail") {
+			t.Fatalf("error = %q, want it to contain 'guardrail'", errResp.Error)
+		}
+	})
+
+	t.Run("guardrail_output_tag_on_run", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-guardrail-tag",
+			Message:   "Eve",
+		})
+		if !strings.HasSuffix(resp.Output, " [guardrail:ok]") {
+			t.Fatalf("output = %q, want suffix ' [guardrail:ok]'", resp.Output)
+		}
+	})
+
+	t.Run("guardrail_stream_digit_redaction", func(t *testing.T) {
+		events := postSSE(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "session-guardrail-stream",
+			Message:   "test 123",
+		})
+
+		for _, e := range events {
+			if e.name != "agent.delta" {
+				continue
+			}
+			var payload struct {
+				Delta string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(e.data), &payload); err != nil {
+				t.Fatalf("unmarshal delta: %v", err)
+			}
+			for _, r := range payload.Delta {
+				if r >= '0' && r <= '9' {
+					t.Fatalf("delta %q contains unredacted digit", payload.Delta)
+				}
+			}
+		}
+
+		last := events[len(events)-1]
+		if last.name != "agent.completed" {
+			t.Fatalf("last event = %q want agent.completed", last.name)
+		}
+		var completed struct {
+			Output string `json:"output"`
+		}
+		if err := json.Unmarshal([]byte(last.data), &completed); err != nil {
+			t.Fatalf("unmarshal completed: %v", err)
+		}
+		if !strings.HasSuffix(completed.Output, " [guardrail:ok]") {
+			t.Fatalf("completed output = %q, want suffix ' [guardrail:ok]'", completed.Output)
+		}
+	})
 }
 
 func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
@@ -362,16 +423,16 @@ func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if first.Output != "hello, Ada" {
-		t.Fatalf("first = %q want %q", first.Output, "hello, Ada")
+	if first.Output != "hello, Ada [guardrail:ok]" {
+		t.Fatalf("first = %q want %q", first.Output, "hello, Ada [guardrail:ok]")
 	}
 
 	second := postJSON[runResponse](t, client, runURL1, runRequest{
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if second.Output != "welcome back, Ada" {
-		t.Fatalf("second = %q want %q", second.Output, "welcome back, Ada")
+	if second.Output != "welcome back, Ada [guardrail:ok]" {
+		t.Fatalf("second = %q want %q", second.Output, "welcome back, Ada [guardrail:ok]")
 	}
 
 	stopDemo(cmd1)
@@ -386,8 +447,8 @@ func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if afterRestart.Output != "hello, Ada" {
-		t.Fatalf("after restart = %q want %q (memory should be cleared)", afterRestart.Output, "hello, Ada")
+	if afterRestart.Output != "hello, Ada [guardrail:ok]" {
+		t.Fatalf("after restart = %q want %q (memory should be cleared)", afterRestart.Output, "hello, Ada [guardrail:ok]")
 	}
 }
 

@@ -120,3 +120,34 @@ Content-Type: application/json
   "item": "server-rack",
   "amount": 200
 }
+
+###
+# Guardrail: input block (message contains BLOCK_ME)
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-guardrail-block",
+  "message": "BLOCK_ME"
+}
+
+###
+# Guardrail: output tag (observe [guardrail:ok] suffix)
+POST {{baseUrl}}/agents/{{agentName}}/runs
+Content-Type: application/json
+
+{
+  "session_id": "session-guardrail-tag",
+  "message": "Eve"
+}
+
+###
+# Guardrail: stream digit redaction (digits replaced by *)
+POST {{baseUrl}}/agents/{{agentName}}/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "session_id": "session-guardrail-stream",
+  "message": "test 123"
+}

@@ -454,6 +454,8 @@ func (s *httpServer) writeResolveError(w http.ResponseWriter, err error) {
 
 func (s *httpServer) writeAgentError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, agent.ErrGuardrailBlocked):
+		writeJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: err.Error()})
 	case errors.Is(err, agent.ErrInvalidRequest):
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
