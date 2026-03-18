@@ -8,6 +8,7 @@ Esta demo executavel prova o fluxo base local da `gaal-lib` com:
 - `pkg/logger`
 - `pkg/memory`
 - `pkg/tool`
+- `pkg/workflow`
 
 Ela foi desenhada para ser simples, didatica e local. Nao depende de VoltOps, nao usa provider remoto e sobe com um unico comando.
 
@@ -37,6 +38,8 @@ Por default, ela escuta em `127.0.0.1:8080`.
 - `GET /agents`: lista os agents registrados
 - `POST /agents/{name}/runs`: execucao textual sincrona
 - `POST /agents/{name}/stream`: streaming SSE
+- `GET /workflows`: lista os workflows registrados
+- `POST /workflows/{name}/runs`: executa um workflow
 
 ## Tools registradas
 
@@ -158,6 +161,46 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
   }'
 ```
 
+## Workflow registrado
+
+A demo registra o workflow `order-processing`, que simula um fluxo de processamento de pedidos com decisao condicional. O workflow possui 5 steps:
+
+1. `validate_order` (Action) — valida campos obrigatorios (`item`, `amount`) e grava no state
+2. `route_order` (Branch) — se `amount > 100`, desvia para `manual_review`; caso contrario, para `auto_approve`
+3. `auto_approve` (Action) — marca status como `approved`
+4. `manual_review` (Action) — marca status como `pending_review`
+5. `confirm` (Action) — monta mensagem final com status e detalhes
+
+O workflow usa `InMemoryHistory` para historico local, `NewLoggingHook` para observabilidade via logs e `FixedRetryPolicy{MaxRetries: 1}` para retry basico.
+
+Listagem de workflows:
+
+```bash
+curl http://127.0.0.1:8080/workflows
+```
+
+Workflow run (auto-approve, amount <= 100):
+
+```bash
+curl -X POST http://127.0.0.1:8080/workflows/order-processing/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "item": "notebook",
+    "amount": 50
+  }'
+```
+
+Workflow run (manual review, amount > 100):
+
+```bash
+curl -X POST http://127.0.0.1:8080/workflows/order-processing/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "item": "server-rack",
+    "amount": 200
+  }'
+```
+
 ## Smoke manual
 
 1. Suba a demo com `go run ./cmd/demo-app`.
@@ -171,6 +214,9 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 9. Execute `POST /agents/demo-agent/runs` com `"message": "sum 3 and 7"` e confirme output contendo "10".
 10. Execute `POST /agents/demo-agent/runs` com `"message": "use unknown_tool please"` e confirme erro de tool na resposta.
 11. Execute `POST /agents/demo-agent/stream` com `"message": "what time is it?"` e observe eventos `agent.tool_call` e `agent.tool_result` no SSE.
+12. Chame `GET /workflows` e confirme a presenca do `order-processing`.
+13. Execute `POST /workflows/order-processing/runs` com `"item": "notebook", "amount": 50` e confirme `status: approved`.
+14. Execute `POST /workflows/order-processing/runs` com `"item": "server-rack", "amount": 200` e confirme `status: pending_review`.
 
 ## Arquivos uteis
 
@@ -184,7 +230,6 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 - a heuristica de tool call e baseada em keywords na mensagem do usuario, nao em raciocinio real do modelo
 - a memoria e apenas in-process via `memory.InMemoryStore`; reiniciar o processo limpa todo o estado conversacional
 - o streaming HTTP usa um adapter SSE minimo da demo, sem promover um helper HTTP generico novo em `pkg/server`
-- nao ha tool calls paralelas nem workflows multi-step complexos
 - o erro de tool e provocado por tool desconhecida, nao por falha real de execucao
 - nao ha toolkit na demo; tools sao registradas individualmente
 - nao ha autenticacao, rate limit nem OpenAPI formal nesta entrega

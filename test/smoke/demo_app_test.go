@@ -277,6 +277,76 @@ func TestDemoApp(t *testing.T) {
 			t.Fatalf("Allow = %q want POST", allow)
 		}
 	})
+
+	t.Run("workflow_list", func(t *testing.T) {
+		resp := getJSON[workflowsResponse](t, client, baseURL+"/workflows")
+		if len(resp.Workflows) != 1 {
+			t.Fatalf("len(workflows) = %d want 1", len(resp.Workflows))
+		}
+		if resp.Workflows[0].Name != "order-processing" {
+			t.Fatalf("workflow name = %q want order-processing", resp.Workflows[0].Name)
+		}
+	})
+
+	t.Run("workflow_auto_approve", func(t *testing.T) {
+		resp := postJSON[workflowRunResponse](t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "notebook",
+			Amount: 50,
+		})
+		if resp.WorkflowName != "order-processing" {
+			t.Fatalf("workflow_name = %q want order-processing", resp.WorkflowName)
+		}
+		if resp.Status != "completed" {
+			t.Fatalf("status = %q want completed", resp.Status)
+		}
+		if resp.RunID == "" {
+			t.Fatal("run_id = empty")
+		}
+		orderStatus, _ := resp.Output["status"].(string)
+		if orderStatus != "approved" {
+			t.Fatalf("output.status = %q want approved", orderStatus)
+		}
+	})
+
+	t.Run("workflow_manual_review", func(t *testing.T) {
+		resp := postJSON[workflowRunResponse](t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "server-rack",
+			Amount: 200,
+		})
+		if resp.Status != "completed" {
+			t.Fatalf("status = %q want completed", resp.Status)
+		}
+		orderStatus, _ := resp.Output["status"].(string)
+		if orderStatus != "pending_review" {
+			t.Fatalf("output.status = %q want pending_review", orderStatus)
+		}
+	})
+
+	t.Run("workflow_invalid_input", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "",
+			Amount: 0,
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d want 400", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("workflow_not_found_404", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/workflows/missing/runs", workflowRunRequest{
+			Item:   "x",
+			Amount: 10,
+		})
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d want 404", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
 }
 
 func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
@@ -364,6 +434,27 @@ type runResponse struct {
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+type workflowDescriptor struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+type workflowsResponse struct {
+	Workflows []workflowDescriptor `json:"workflows"`
+}
+
+type workflowRunRequest struct {
+	Item   string  `json:"item"`
+	Amount float64 `json:"amount"`
+}
+
+type workflowRunResponse struct {
+	RunID        string         `json:"run_id"`
+	WorkflowName string         `json:"workflow_name"`
+	Status       string         `json:"status"`
+	Output       map[string]any `json:"output"`
 }
 
 type sseEvent struct {

@@ -16,6 +16,7 @@ import (
 	"github.com/luanlima/gaal-lib/pkg/app"
 	gaalserver "github.com/luanlima/gaal-lib/pkg/server"
 	"github.com/luanlima/gaal-lib/pkg/types"
+	"github.com/luanlima/gaal-lib/pkg/workflow"
 )
 
 type httpServerConfig struct {
@@ -70,6 +71,8 @@ func (s *httpServer) Start(ctx context.Context, rt app.Runtime) error {
 	mux.HandleFunc("/readyz", s.handleReady)
 	mux.HandleFunc("/agents", s.handleAgents)
 	mux.HandleFunc("/agents/", s.handleAgentRoutes)
+	mux.HandleFunc("/workflows", s.handleWorkflows)
+	mux.HandleFunc("/workflows/", s.handleWorkflowRoutes)
 
 	server := &http.Server{
 		Handler:           mux,
@@ -158,6 +161,22 @@ type streamEvent struct {
 	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
+type workflowsResponse struct {
+	Workflows []workflow.Descriptor `json:"workflows"`
+}
+
+type workflowRunRequest struct {
+	Item   string  `json:"item"`
+	Amount float64 `json:"amount"`
+}
+
+type workflowRunResponse struct {
+	RunID        string         `json:"run_id"`
+	WorkflowName string         `json:"workflow_name"`
+	Status       string         `json:"status"`
+	Output       map[string]any `json:"output"`
+}
+
 func (s *httpServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.writeMethodNotAllowed(w, http.MethodGet)
@@ -214,7 +233,7 @@ func (s *httpServer) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *httpServer) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
-	name, action, ok := parseAgentRoute(r.URL.Path)
+	name, action, ok := parseSubRoute(r.URL.Path, "/agents/")
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -232,18 +251,6 @@ func (s *httpServer) handleAgentRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func parseAgentRoute(path string) (name string, action string, ok bool) {
-	trimmed := strings.TrimPrefix(path, "/agents/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	if parts[0] == "" || parts[1] == "" {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func (s *httpServer) handleRun(w http.ResponseWriter, r *http.Request, name string) {
@@ -454,6 +461,106 @@ func (s *httpServer) writeAgentError(w http.ResponseWriter, err error) {
 	default:
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 	}
+}
+
+func (s *httpServer) handleWorkflows(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/workflows" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		s.writeMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+	rt := s.getRuntime()
+	writeJSON(w, http.StatusOK, workflowsResponse{
+		Workflows: rt.ListWorkflows(),
+	})
+}
+
+func (s *httpServer) handleWorkflowRoutes(w http.ResponseWriter, r *http.Request) {
+	name, action, ok := parseSubRoute(r.URL.Path, "/workflows/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch {
+	case action == "runs" && r.Method == http.MethodPost:
+		s.handleWorkflowRun(w, r, name)
+	case action == "runs":
+		s.writeMethodNotAllowed(w, http.MethodPost)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *httpServer) handleWorkflowRun(w http.ResponseWriter, r *http.Request, name string) {
+	rt := s.getRuntime()
+	wf, err := rt.ResolveWorkflow(name)
+	if err != nil {
+		if errors.Is(err, app.ErrWorkflowNotFound) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	req, err := decodeWorkflowRunRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+
+	resp, err := wf.Run(r.Context(), workflow.Request{
+		Input: map[string]any{
+			"item":   req.Item,
+			"amount": req.Amount,
+		},
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, workflowRunResponse{
+		RunID:        resp.RunID,
+		WorkflowName: resp.WorkflowName,
+		Status:       string(resp.Status),
+		Output:       resp.Output,
+	})
+}
+
+func decodeWorkflowRunRequest(r *http.Request) (workflowRunRequest, error) {
+	defer func() {
+		_ = r.Body.Close()
+	}()
+
+	var req workflowRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return workflowRunRequest{}, fmt.Errorf("invalid json body: %w", err)
+	}
+	req.Item = strings.TrimSpace(req.Item)
+	if req.Item == "" {
+		return workflowRunRequest{}, errors.New("item is required")
+	}
+	if req.Amount <= 0 {
+		return workflowRunRequest{}, errors.New("amount must be positive")
+	}
+	return req, nil
+}
+
+func parseSubRoute(path, prefix string) (name string, action string, ok bool) {
+	trimmed := strings.TrimPrefix(path, prefix)
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

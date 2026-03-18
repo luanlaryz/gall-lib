@@ -96,3 +96,27 @@ Accept: text/event-stream
   "session_id": "session-tool-stream",
   "message": "what time is it?"
 }
+
+###
+# Workflows
+GET {{baseUrl}}/workflows
+
+###
+# Workflow run: auto-approve (amount <= 100)
+POST {{baseUrl}}/workflows/order-processing/runs
+Content-Type: application/json
+
+{
+  "item": "notebook",
+  "amount": 50
+}
+
+###
+# Workflow run: manual review (amount > 100)
+POST {{baseUrl}}/workflows/order-processing/runs
+Content-Type: application/json
+
+{
+  "item": "server-rack",
+  "amount": 200
+}
