@@ -250,6 +250,37 @@ curl -N -X POST http://127.0.0.1:8080/agents/demo-agent/stream \
 
 Resultado esperado: deltas contem `***` em vez de `123`, e o output final termina com ` [guardrail:ok]`.
 
+## Web UI
+
+A demo inclui uma interface web minima embutida no proprio servidor. Nao requer Node, npm ou qualquer toolchain de frontend.
+
+### Acessar
+
+Suba a demo normalmente e abra o navegador:
+
+```
+http://127.0.0.1:8080/
+```
+
+### Funcionalidades
+
+- **Seletor de agent**: carregado automaticamente via `GET /agents`
+- **Session ID**: gerado automaticamente, editavel
+- **Envio textual**: botao "Send" dispara `POST /agents/{name}/runs` e exibe a resposta completa
+- **Streaming SSE**: botao "Stream" dispara `POST /agents/{name}/stream` e exibe deltas em tempo real
+- **Tool calls**: exibidas automaticamente quando o agent aciona tools
+- **Erros**: exibidos inline na area de chat (guardrail blocks, network errors, etc)
+- **Limpar chat**: botao "Clear" reinicia a conversa visual
+
+### Exemplos de uso
+
+1. Digite `Ada` e clique **Send** para resposta textual
+2. Digite `Grace` e clique **Stream** para ver deltas chegando via SSE
+3. Digite `what time is it?` para acionar a tool `get_time`
+4. Digite `sum 3 and 7` para acionar a tool `calculate_sum`
+5. Digite `BLOCK_ME` para ver o erro do input guardrail
+6. Digite `test 123` e clique **Stream** para ver a redacao de digitos pelo stream guardrail
+
 ## Smoke manual
 
 1. Suba a demo com `go run ./cmd/demo-app`.
