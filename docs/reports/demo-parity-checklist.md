@@ -1,6 +1,8 @@
 # Demo Parity Checklist
 
-Date: 2026-03-17
+Date: 2026-03-18 (closure audit — Spec 114)
+
+Previous audit: 2026-03-17
 
 ## 9.1 Build e ambiente
 
@@ -70,3 +72,24 @@ Date: 2026-03-17
 - O binário da demo não importa `internal/*`, conforme a `Spec 100`.
 - A cobertura de smoke agora inclui o caminho principal, erros HTTP observáveis, streaming SSE e prova de limpeza de memória após reinício do processo.
 - Ver [docs/reports/demo-parity-report.md](/Users/luanlima/Documents/study/go/gaal-lib/docs/reports/demo-parity-report.md) para scorecard, severidades e decisão de aptidão.
+
+## Closure audit (Spec 114) — 2026-03-18
+
+A checklist da `Spec 110` foi reaplicada integralmente em 2026-03-18 como parte da `Spec 114: Demo V1 Closure Diagnosis`.
+
+### Evidência executável fresca
+
+- `go test ./... -v -count=1` executado sem cache em 2026-03-18: **PASS** (0 falhas).
+- `test/smoke` executou `TestDemoApp` (11 subtests) e `TestDemoAppMemoryResetAfterRestart`: todos PASS.
+- Ambiente: `go version go1.26.1 darwin/arm64`, `go.mod` declara `go 1.26.1`.
+
+### Resultado da reaplicação
+
+- Todos os 39 itens da checklist (9.1–9.6) permanecem marcados [x].
+- Nenhum item regrediu ou mudou de status.
+- Nenhum gap novo identificado.
+- Os 3 gaps anteriores (DPG-001, DPG-002, DPG-003) permanecem RESOLVED.
+
+### Decisão
+
+A checklist confirma o status `APT for base demo parity` sem reservas.

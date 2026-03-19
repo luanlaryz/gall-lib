@@ -1,12 +1,14 @@
-# Demo Parity Report
+# Demo Parity Report — V1 Closure
 
-Date: 2026-03-17
+Date: 2026-03-18 (Spec 114: Demo V1 Closure Diagnosis)
+
+Previous report: 2026-03-17
 
 ## 1. Executive summary
 
-- Status geral: a demo atual prova o fluxo base local da `gaal-lib`, com evidência executável para boot, probes, listagem de agents, run textual, streaming SSE e memória in-process.
+- Status geral: `APT for base demo parity` — confirmado.
 - Blockers to validation: nenhum.
-- Conclusão curta: a demo está `APT for base demo parity` como evidência do fluxo base. Todos os gaps identificados anteriormente foram resolvidos.
+- Conclusão curta: a checklist da `Spec 110` foi reaplicada integralmente com evidência executável fresca. Todos os 39 itens permanecem marcados. Os 3 gaps identificados anteriormente (DPG-001, DPG-002, DPG-003) continuam resolvidos. Nenhum gap novo foi encontrado. A demo é uma prova fechada do fluxo base da `gaal-lib`.
 
 ## 2. Evidence reviewed
 
@@ -20,7 +22,8 @@ Date: 2026-03-17
 - [specs/050-memory.md](/Users/luanlima/Documents/study/go/gaal-lib/specs/050-memory.md)
 - [specs/081-server.md](/Users/luanlima/Documents/study/go/gaal-lib/specs/081-server.md)
 - [specs/100-demo-app.md](/Users/luanlima/Documents/study/go/gaal-lib/specs/100-demo-app.md)
-- `Spec 110: Demo Parity Diagnosis`
+- [specs/110-demo-parity-diagnosis.md](/Users/luanlima/Documents/study/go/gaal-lib/specs/110-demo-parity-diagnosis.md)
+- [specs/114-demo-v1-closure-diagnosis.md](/Users/luanlima/Documents/study/go/gaal-lib/specs/114-demo-v1-closure-diagnosis.md)
 
 ### Arquivos inspecionados
 
@@ -46,12 +49,12 @@ Date: 2026-03-17
 
 ### Testes executados
 
-- `go test ./...` -> `PASS`
-- `test/smoke` incluído dentro de `go test ./...` -> `PASS`
+- `go test ./... -v -count=1` (sem cache) em 2026-03-18: **PASS**
+- `test/smoke` incluído: `TestDemoApp` (11 subtests) + `TestDemoAppMemoryResetAfterRestart`: todos PASS
 
 ### Evidência executável observada
 
-- Boot local com `go run ./cmd/demo-app` em `127.0.0.1:18080` -> `PASS`
+- Boot local com `go run ./cmd/demo-app` em `127.0.0.1:18080`: PASS
 - `GET /healthz` -> `200` com `{"state":"running","health":true,"ready":true,"draining":false}`
 - `GET /readyz` -> `200` com `{"state":"running","health":true,"ready":true,"draining":false}`
 - `GET /agents` -> `200` com `demo-agent`
@@ -83,18 +86,25 @@ Date: 2026-03-17
 - Severidade: `S2`
 - Descricao: o binário da demo importava `internal/demoapp`, contrariando a regra explícita da `Spec 100` de não importar `internal/*` a partir de `cmd/demo-app`.
 - Resolução: o código de composição da demo foi movido para arquivos locais no pacote `main` em `cmd/demo-app/` (`config.go`, `agent.go`, `server.go`). O `internal/demoapp/` foi removido. Nenhuma API pública nova foi criada. O binário não importa `internal/*`.
+- Status na closure: confirmado resolvido. `internal/demoapp/` não existe. Nenhum import de `internal/*` em `cmd/demo-app/`.
 
 ### DPG-002 (RESOLVED)
 
 - Severidade: `S2`
 - Descricao: o smoke test automatizado validava apenas o caminho feliz de boot, probes, listagem e run textual; o diagnóstico de streaming e de erros HTTP dependia de evidência manual.
 - Resolução: `test/smoke/demo_app_test.go` foi expandido com subtests para streaming SSE (`streaming_sse`), agent inexistente (`agent_not_found_404`), request inválido (`invalid_request_400`) e método inválido (`method_not_allowed_405`). O teste agora usa abordagem de subprocesso, construindo e executando o binário real da demo.
+- Status na closure: confirmado resolvido. Os subtests executaram e passaram em 2026-03-18.
 
 ### DPG-003 (RESOLVED)
 
 - Severidade: `S3`
 - Descricao: a semântica de perda de memória após reinício estava documentada, mas não estava coberta por automação.
 - Resolução: `TestDemoAppMemoryResetAfterRestart` foi adicionado em `test/smoke/demo_app_test.go`. O teste inicia a demo, estabelece memória conversacional com duas chamadas, para o processo, reinicia em porta nova e verifica que a mesma `session_id` volta ao comportamento inicial (`"hello, Ada"` em vez de `"welcome back, Ada"`).
+- Status na closure: confirmado resolvido. O teste executou e passou em 2026-03-18.
+
+### Novos gaps
+
+Nenhum gap novo identificado na closure.
 
 ## 5. Aptness decision
 
@@ -107,12 +117,38 @@ Date: 2026-03-17
 - Os endpoints críticos e o streaming estão implementados e verificáveis.
 - O binário não importa `internal/*`, conforme a `Spec 100`.
 - Existe smoke test automatizado cobrindo o caminho principal, erros HTTP, streaming SSE e limpeza de memória após reinício.
-- Todos os gaps identificados no diagnóstico anterior foram resolvidos.
+- Todos os gaps identificados no diagnóstico anterior foram resolvidos e confirmados na closure.
+- Nenhum gap novo foi encontrado.
+- A evidência executável fresca (testes rodados sem cache em 2026-03-18) confirma estabilidade.
 
 ## 6. Next prioritized actions
 
-Nenhuma ação prioritária remanescente para a demo base. Ações futuras possíveis:
+Nenhuma ação remanescente para a demo base v1. Trilha v2 recomendada:
 
-1. Avaliar se a demo deve evoluir para demonstrar tools, guardrails ou sub-agents quando a biblioteca suportar.
-2. Considerar a adição de exemplos de uso com providers reais quando disponíveis.
-3. Monitorar o tamanho de `cmd/demo-app/server.go` e avaliar split se ultrapassar 500 linhas.
+1. **Tools (Spec 040)**: adicionar suporte a tools no agent e demonstrar na demo. Este é o próximo bloco funcional que mais amplia a utilidade prática da biblioteca e já tem spec aprovada.
+2. **Guardrails (Spec 060)**: input/output guardrails integrados ao fluxo da demo.
+3. **Workflows / Sub-agents (Spec 070)**: composição multi-agent demonstrada na demo.
+4. **Providers reais**: integrar pelo menos um provider LLM real como alternativa ao modelo fake.
+5. **OpenAPI / docs avançados**: documentação formal da superfície HTTP da demo.
+
+Recomendação: começar pela trilha **Tools (Spec 040)**.
+
+## 7. Comparison with previous diagnosis
+
+| Aspecto | Diagnóstico anterior (2026-03-17) | Closure (2026-03-18) |
+| --- | --- | --- |
+| Status | `APT for base demo parity` | `APT for base demo parity` (confirmado) |
+| Gaps abertos | 0 | 0 |
+| Gaps resolvidos | 3 (DPG-001, DPG-002, DPG-003) | 3 (mesmos, nenhum novo) |
+| Scorecard PASS | 9/9 | 9/9 |
+| Bloqueios de ambiente | 0 | 0 |
+| `go test ./...` | PASS | PASS (re-verificado sem cache) |
+| Checklist 9.1–9.6 | 39/39 [x] | 39/39 [x] |
+
+### Delta
+
+Nenhuma regressão. Nenhuma mudança de status. Evidência executável fresca confirma estabilidade integral.
+
+### Conclusão da comparação
+
+O relatório de closure confirma integralmente o diagnóstico anterior. A demo v1 está fechada como prova do fluxo base da `gaal-lib`.

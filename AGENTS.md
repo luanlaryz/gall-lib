@@ -28,6 +28,9 @@
 - Toda feature implementada deve ser rastreavel para pelo menos uma spec.
 - Toda mudanca de comportamento deve incluir atualizacao ou adicao de testes.
 - Toda mudanca relevante deve ser validada contra a feature matrix como checklist de cobertura.
+- Toda trilha nova deve nascer com duas specs complementares: uma spec de construcao e uma spec de diagnostico.
+- Nao considerar uma trilha nova suficientemente spec driven se existir apenas spec de construcao sem spec de diagnostico.
+- Ao propor uma nova trilha, o agente deve verificar se ambas as specs existem. Se faltar qualquer uma delas, deve refinar o pedido ate fechar as duas antes de seguir para implementacao.
 
 ## 4. Architectural rules
 
@@ -61,6 +64,15 @@
 - Testes em `internal/*` devem validar detalhes de runtime e corretude operacional.
 - Suites em `test/conformance` devem usar apenas a superficie publica em `pkg/*`.
 - Se uma mudanca nao puder ser coberta por teste imediatamente, o gap deve ser declarado explicitamente com justificativa tecnica.
+
+## Dual-spec rule for new tracks
+
+- Toda trilha nova deve possuir duas specs normativas e rastreaveis.
+- A spec de construcao define objetivo, escopo, fora de escopo, arquitetura, contratos, testes e criterios de aceite.
+- A spec de diagnostico define sinais observaveis, sintomas de falha, hipoteses, metricas, logs, traces, health checks, consultas operacionais, troubleshooting e criterios de confirmacao.
+- Nao iniciar implementacao de trilha nova sem as duas specs.
+- Se existir spec de construcao sem spec de diagnostico, tratar como gap de especificacao.
+- O agente deve refinar o pedido ate fechar ambas as specs antes de gerar prompts de execucao.
 
 ## 7. Spec compliance rules
 
@@ -107,6 +119,7 @@
 - Tenant/auth/quota: [`skills/02-tenant-auth-quotas/SKILL.md`](skills/02-tenant-auth-quotas/SKILL.md).
 - ACK assíncrono/use cases de comando: [`skills/03-async-command-processing/SKILL.md`](skills/03-async-command-processing/SKILL.md).
 - SSE/WS/replay por `seq`: [`skills/04-streaming-sse-ws/SKILL.md`](skills/04-streaming-sse-ws/SKILL.md).
+- Refinamento de pedido em specs de construcao e diagnostico, arquitetura, decisao entre amend/new spec e geracao de prompt para Cursor/Codex: [`skills/05-gaal-spec-architect/SKILL.md`](skills/05-gaal-spec-architect/SKILL.md).
 - Roteamento de provider/model por seller: [`skills/06-multi-provider-model-routing/SKILL.md`](skills/06-multi-provider-model-routing/SKILL.md).
 - Postgres/pgx/migrations: [`skills/07-postgres-pgx-migrate/SKILL.md`](skills/07-postgres-pgx-migrate/SKILL.md).
 - Redis cache/streams/TTL: [`skills/08-redis-cache-streams/SKILL.md`](skills/08-redis-cache-streams/SKILL.md).

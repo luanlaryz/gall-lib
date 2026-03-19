@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gaal Spec Architect"
+  short_description: "Refina pedidos vagos ate virarem specs executaveis do gaal-lib, com prompts para Cursor/Codex e checklist de PR."
+  category: "developer"

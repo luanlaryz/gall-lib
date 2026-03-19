@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gaal-lib demo</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;
+  --text:#e1e4ed;--muted:#7a7f8e;--accent:#6c8cff;
+  --accent-dim:#3a4a7a;--user-bg:#252940;--agent-bg:#1e2230;
+  --error:#ff6b6b;--tool:#50c878;--mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+  --sans:'Inter','Segoe UI',system-ui,sans-serif;
+}
+html,body{height:100%;font-family:var(--sans);background:var(--bg);color:var(--text)}
+a{color:var(--accent)}
+
+.app{display:flex;flex-direction:column;height:100vh;max-width:860px;margin:0 auto}
+
+header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-shrink:0}
+header h1{font-size:18px;font-weight:600;letter-spacing:-0.3px}
+header h1 span{color:var(--accent)}
+header .tag{font-size:11px;color:var(--muted);background:var(--surface);padding:2px 8px;border-radius:4px;font-family:var(--mono)}
+
+.controls{padding:10px 20px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap;flex-shrink:0}
+.controls label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.controls select,.controls input[type=text]{
+  background:var(--surface);border:1px solid var(--border);color:var(--text);
+  padding:5px 10px;border-radius:4px;font-size:13px;font-family:var(--mono);outline:none;
+}
+.controls select:focus,.controls input[type=text]:focus{border-color:var(--accent)}
+.controls select{cursor:pointer}
+.controls .spacer{flex:1}
+.btn-sm{
+  background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer;transition:all .15s;
+}
+.btn-sm:hover{border-color:var(--accent);color:var(--accent)}
+
+.chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+
+.msg{max-width:85%;display:flex;flex-direction:column;gap:4px}
+.msg.user{align-self:flex-end}
+.msg.agent{align-self:flex-start}
+
+.msg .bubble{
+  padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.5;
+  white-space:pre-wrap;word-break:break-word;
+}
+.msg.user .bubble{background:var(--user-bg);border-bottom-right-radius:2px}
+.msg.agent .bubble{background:var(--agent-bg);border:1px solid var(--border);border-bottom-left-radius:2px;font-family:var(--mono);font-size:13px}
+.msg .meta{font-size:11px;color:var(--muted);padding:0 4px}
+.msg.user .meta{text-align:right}
+
+.msg .tools{
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:8px 12px;font-size:12px;font-family:var(--mono);color:var(--tool);
+}
+.msg .tools .tool-label{color:var(--muted);font-size:11px;margin-bottom:2px}
+
+.msg .error-text{color:var(--error)}
+.msg .streaming-cursor::after{content:"▊";animation:blink .6s step-end infinite;color:var(--accent)}
+@keyframes blink{50%{opacity:0}}
+
+.empty-state{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--muted);font-size:14px;text-align:center;padding:40px;
+}
+.empty-state p{margin-bottom:6px}
+.empty-state kbd{
+  background:var(--surface);border:1px solid var(--border);padding:2px 6px;
+  border-radius:3px;font-family:var(--mono);font-size:12px;
+}
+
+.input-bar{
+  padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;
+  align-items:flex-end;flex-shrink:0;background:var(--surface);
+}
+.input-bar textarea{
+  flex:1;resize:none;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:10px 14px;border-radius:8px;font-size:14px;
+  font-family:var(--sans);line-height:1.4;outline:none;min-height:42px;max-height:120px;
+}
+.input-bar textarea:focus{border-color:var(--accent)}
+.input-bar textarea::placeholder{color:var(--muted)}
+
+.btn{
+  padding:10px 18px;border:none;border-radius:8px;font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover:not(:disabled){background:#5a7aee}
+.btn-outline{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.btn-outline:hover:not(:disabled){background:var(--accent-dim)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1><span>gaal-lib</span> demo</h1>
+    <span class="tag">local</span>
+  </header>
+
+  <div class="controls">
+    <label>Agent
+      <select id="agentSelect"><option value="">loading…</option></select>
+    </label>
+    <label>Session
+      <input type="text" id="sessionInput" size="18">
+    </label>
+    <span class="spacer"></span>
+    <button class="btn-sm" id="clearBtn" title="Clear chat">Clear</button>
+  </div>
+
+  <div class="chat" id="chat">
+    <div class="empty-state" id="emptyState">
+      <div>
+        <p>Send a message to the agent.</p>
+        <p>Use <kbd>Send</kbd> for textual or <kbd>Stream</kbd> for SSE.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-bar">
+    <textarea id="msgInput" rows="1" placeholder="Type a message…" autofocus></textarea>
+    <button class="btn btn-primary" id="sendBtn">Send</button>
+    <button class="btn btn-outline" id="streamBtn">Stream</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (s) => document.querySelector(s);
+  const chat = $("#chat");
+  const emptyState = $("#emptyState");
+  const agentSelect = $("#agentSelect");
+  const sessionInput = $("#sessionInput");
+  const msgInput = $("#msgInput");
+  const sendBtn = $("#sendBtn");
+  const streamBtn = $("#streamBtn");
+  const clearBtn = $("#clearBtn");
+
+  let busy = false;
+
+  sessionInput.value = "session-" + Math.random().toString(36).slice(2, 8);
+
+  fetch("/agents")
+    .then(r => r.json())
+    .then(data => {
+      agentSelect.innerHTML = "";
+      (data.agents || []).forEach(a => {
+        const opt = document.createElement("option");
+        opt.value = a.name;
+        opt.textContent = a.name;
+        agentSelect.appendChild(opt);
+      });
+      if (!agentSelect.value && agentSelect.options.length) {
+        agentSelect.selectedIndex = 0;
+      }
+    })
+    .catch(() => { agentSelect.innerHTML = '<option value="demo-agent">demo-agent</option>'; });
+
+  function agentName(){ return agentSelect.value || "demo-agent"; }
+  function sessionID(){ return sessionInput.value.trim() || "default"; }
+
+  function hideEmpty(){
+    if(emptyState) emptyState.style.display = "none";
+  }
+
+  function scrollBottom(){
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function addUserMsg(text){
+    hideEmpty();
+    const div = document.createElement("div");
+    div.className = "msg user";
+    div.innerHTML = '<div class="bubble"></div><div class="meta">you</div>';
+    div.querySelector(".bubble").textContent = text;
+    chat.appendChild(div);
+    scrollBottom();
+  }
+
+  function createAgentMsg(){
+    hideEmpty();
+    const div = document.createElement("div");
+    div.className = "msg agent";
+    div.innerHTML = '<div class="bubble"></div><div class="meta">agent</div>';
+    chat.appendChild(div);
+    scrollBottom();
+    return div;
+  }
+
+  function appendToolInfo(msgEl, toolCalls){
+    if(!toolCalls || !toolCalls.length) return;
+    const toolDiv = document.createElement("div");
+    toolDiv.className = "tools";
+    toolCalls.forEach(tc => {
+      const line = document.createElement("div");
+      line.innerHTML = '<div class="tool-label">tool: ' + escapeHTML(tc.name) + '</div>';
+      if(tc.input && Object.keys(tc.input).length){
+        line.innerHTML += "input: " + escapeHTML(JSON.stringify(tc.input));
+      }
+      if(tc.output){
+        line.innerHTML += "\noutput: " + escapeHTML(tc.output);
+      }
+      toolDiv.appendChild(line);
+    });
+    msgEl.insertBefore(toolDiv, msgEl.querySelector(".meta"));
+  }
+
+  function escapeHTML(s){
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function setBusy(v){
+    busy = v;
+    sendBtn.disabled = v;
+    streamBtn.disabled = v;
+    msgInput.disabled = v;
+  }
+
+  function autoResize(){
+    msgInput.style.height = "auto";
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
+  }
+  msgInput.addEventListener("input", autoResize);
+
+  msgInput.addEventListener("keydown", (e) => {
+    if(e.key === "Enter" && !e.shiftKey){
+      e.preventDefault();
+      sendBtn.click();
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    chat.innerHTML = "";
+    const es = document.createElement("div");
+    es.className = "empty-state";
+    es.id = "emptyState";
+    es.innerHTML = '<div><p>Send a message to the agent.</p><p>Use <kbd>Send</kbd> for textual or <kbd>Stream</kbd> for SSE.</p></div>';
+    chat.appendChild(es);
+  });
+
+  sendBtn.addEventListener("click", async () => {
+    const text = msgInput.value.trim();
+    if(!text || busy) return;
+    msgInput.value = "";
+    autoResize();
+    addUserMsg(text);
+    setBusy(true);
+
+    const agentMsg = createAgentMsg();
+    const bubble = agentMsg.querySelector(".bubble");
+
+    try {
+      const resp = await fetch("/agents/" + encodeURIComponent(agentName()) + "/runs", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({session_id: sessionID(), message: text}),
+      });
+      const data = await resp.json();
+      if(!resp.ok){
+        bubble.classList.add("error-text");
+        bubble.textContent = data.error || "request failed";
+      } else {
+        bubble.textContent = data.output || "(empty)";
+        appendToolInfo(agentMsg, data.tool_calls);
+      }
+    } catch(err){
+      bubble.classList.add("error-text");
+      bubble.textContent = "network error: " + err.message;
+    }
+    scrollBottom();
+    setBusy(false);
+  });
+
+  streamBtn.addEventListener("click", async () => {
+    const text = msgInput.value.trim();
+    if(!text || busy) return;
+    msgInput.value = "";
+    autoResize();
+    addUserMsg(text);
+    setBusy(true);
+
+    const agentMsg = createAgentMsg();
+    const bubble = agentMsg.querySelector(".bubble");
+    bubble.classList.add("streaming-cursor");
+
+    let accumulated = "";
+    const toolCalls = [];
+
+    try {
+      const resp = await fetch("/agents/" + encodeURIComponent(agentName()) + "/stream", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({session_id: sessionID(), message: text}),
+      });
+
+      if(!resp.ok){
+        const data = await resp.json();
+        bubble.classList.remove("streaming-cursor");
+        bubble.classList.add("error-text");
+        bubble.textContent = data.error || "request failed";
+        setBusy(false);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while(true){
+        const {done, value} = await reader.read();
+        if(done) break;
+        buffer += decoder.decode(value, {stream: true});
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        let eventName = "";
+        for(const line of lines){
+          if(line.startsWith("event: ")){
+            eventName = line.slice(7).trim();
+          } else if(line.startsWith("data: ")){
+            const raw = line.slice(6);
+            try {
+              const ev = JSON.parse(raw);
+              handleSSEEvent(eventName, ev, bubble, agentMsg, toolCalls);
+              accumulated = bubble.textContent;
+            } catch(_){}
+          }
+        }
+        scrollBottom();
+      }
+    } catch(err){
+      bubble.classList.add("error-text");
+      if(!bubble.textContent) bubble.textContent = "";
+      bubble.textContent += "\n[stream error: " + err.message + "]";
+    }
+
+    bubble.classList.remove("streaming-cursor");
+    if(!bubble.textContent) bubble.textContent = "(empty)";
+    appendToolInfo(agentMsg, toolCalls);
+    scrollBottom();
+    setBusy(false);
+  });
+
+  function handleSSEEvent(name, ev, bubble, msgEl, toolCalls){
+    switch(name){
+      case "agent.delta":
+        bubble.textContent += (ev.delta || "");
+        break;
+      case "agent.completed":
+        if(ev.output) bubble.textContent = ev.output;
+        break;
+      case "agent.tool_call":
+        toolCalls.push({
+          name: ev.tool_name || "unknown",
+          input: ev.tool_input || {},
+          output: "",
+          status: ev.tool_status || "",
+        });
+        break;
+      case "agent.tool_result":
+        if(toolCalls.length){
+          const last = toolCalls[toolCalls.length - 1];
+          if(ev.tool_output) last.output = ev.tool_output;
+          if(ev.tool_status) last.status = ev.tool_status;
+        }
+        break;
+      case "agent.error":
+      case "agent.failed":
+        bubble.classList.add("error-text");
+        bubble.textContent += (ev.error ? "\n[error: " + ev.error + "]" : "");
+        break;
+    }
+  }
+})();
+</script>
+</body>
+</html>

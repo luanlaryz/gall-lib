@@ -79,8 +79,8 @@ func TestDemoApp(t *testing.T) {
 			Message:   "Ada",
 			Metadata:  map[string]string{"user_id": "user-1", "conversation_id": "conv-1"},
 		})
-		if first.Output != "hello, Ada" {
-			t.Fatalf("first output = %q want %q", first.Output, "hello, Ada")
+		if first.Output != "hello, Ada [guardrail:ok]" {
+			t.Fatalf("first output = %q want %q", first.Output, "hello, Ada [guardrail:ok]")
 		}
 		if first.AgentID == "" {
 			t.Fatal("first AgentID = empty")
@@ -91,8 +91,8 @@ func TestDemoApp(t *testing.T) {
 			Message:   "Ada",
 			Metadata:  map[string]string{"user_id": "user-1", "conversation_id": "conv-1"},
 		})
-		if second.Output != "welcome back, Ada" {
-			t.Fatalf("second output = %q want %q", second.Output, "welcome back, Ada")
+		if second.Output != "welcome back, Ada [guardrail:ok]" {
+			t.Fatalf("second output = %q want %q", second.Output, "welcome back, Ada [guardrail:ok]")
 		}
 	})
 
@@ -118,6 +118,80 @@ func TestDemoApp(t *testing.T) {
 		if !hasDelta {
 			t.Fatal("no agent.delta event found")
 		}
+		last := events[len(events)-1]
+		if last.name != "agent.completed" {
+			t.Fatalf("last event = %q want agent.completed", last.name)
+		}
+	})
+
+	t.Run("tool_call_get_time", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-time",
+			Message:   "what time is it?",
+		})
+		if !strings.Contains(resp.Output, "the current time is") {
+			t.Fatalf("output = %q, want it to contain 'the current time is'", resp.Output)
+		}
+		if len(resp.ToolCalls) == 0 {
+			t.Fatal("expected at least one tool call in response")
+		}
+		if resp.ToolCalls[0].Name != "get_time" {
+			t.Fatalf("tool_calls[0].name = %q want get_time", resp.ToolCalls[0].Name)
+		}
+	})
+
+	t.Run("tool_call_calculate_sum", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-sum",
+			Message:   "sum 3 and 7",
+		})
+		if !strings.Contains(resp.Output, "10") {
+			t.Fatalf("output = %q, want it to contain '10'", resp.Output)
+		}
+		if len(resp.ToolCalls) == 0 {
+			t.Fatal("expected at least one tool call in response")
+		}
+		if resp.ToolCalls[0].Name != "calculate_sum" {
+			t.Fatalf("tool_calls[0].name = %q want calculate_sum", resp.ToolCalls[0].Name)
+		}
+	})
+
+	t.Run("tool_call_error_unknown_tool", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-tool-err",
+			Message:   "use unknown_tool please",
+		})
+		if status != http.StatusInternalServerError {
+			t.Fatalf("status = %d want 500", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error for unknown tool")
+		}
+	})
+
+	t.Run("tool_call_stream_get_time", func(t *testing.T) {
+		events := postSSE(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "session-tool-stream-time",
+			Message:   "what time is it?",
+		})
+
+		hasToolCall := false
+		hasToolResult := false
+		for _, e := range events {
+			if e.name == "agent.tool_call" {
+				hasToolCall = true
+			}
+			if e.name == "agent.tool_result" {
+				hasToolResult = true
+			}
+		}
+		if !hasToolCall {
+			t.Fatal("no agent.tool_call event found in stream")
+		}
+		if !hasToolResult {
+			t.Fatal("no agent.tool_result event found in stream")
+		}
+
 		last := events[len(events)-1]
 		if last.name != "agent.completed" {
 			t.Fatalf("last event = %q want agent.completed", last.name)
@@ -163,6 +237,177 @@ func TestDemoApp(t *testing.T) {
 			t.Fatalf("Allow = %q want POST", allow)
 		}
 	})
+
+	t.Run("stream_agent_not_found_404", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/missing-agent/stream", runRequest{
+			SessionID: "s1",
+			Message:   "hi",
+		})
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d want 404", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("stream_invalid_request_400", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "",
+			Message:   "hi",
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d want 400", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("stream_method_not_allowed_405", func(t *testing.T) {
+		resp, err := client.Get(baseURL + "/agents/demo-agent/stream")
+		if err != nil {
+			t.Fatalf("GET error: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d want 405", resp.StatusCode)
+		}
+		if allow := resp.Header.Get("Allow"); allow != "POST" {
+			t.Fatalf("Allow = %q want POST", allow)
+		}
+	})
+
+	t.Run("workflow_list", func(t *testing.T) {
+		resp := getJSON[workflowsResponse](t, client, baseURL+"/workflows")
+		if len(resp.Workflows) != 1 {
+			t.Fatalf("len(workflows) = %d want 1", len(resp.Workflows))
+		}
+		if resp.Workflows[0].Name != "order-processing" {
+			t.Fatalf("workflow name = %q want order-processing", resp.Workflows[0].Name)
+		}
+	})
+
+	t.Run("workflow_auto_approve", func(t *testing.T) {
+		resp := postJSON[workflowRunResponse](t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "notebook",
+			Amount: 50,
+		})
+		if resp.WorkflowName != "order-processing" {
+			t.Fatalf("workflow_name = %q want order-processing", resp.WorkflowName)
+		}
+		if resp.Status != "completed" {
+			t.Fatalf("status = %q want completed", resp.Status)
+		}
+		if resp.RunID == "" {
+			t.Fatal("run_id = empty")
+		}
+		orderStatus, _ := resp.Output["status"].(string)
+		if orderStatus != "approved" {
+			t.Fatalf("output.status = %q want approved", orderStatus)
+		}
+	})
+
+	t.Run("workflow_manual_review", func(t *testing.T) {
+		resp := postJSON[workflowRunResponse](t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "server-rack",
+			Amount: 200,
+		})
+		if resp.Status != "completed" {
+			t.Fatalf("status = %q want completed", resp.Status)
+		}
+		orderStatus, _ := resp.Output["status"].(string)
+		if orderStatus != "pending_review" {
+			t.Fatalf("output.status = %q want pending_review", orderStatus)
+		}
+	})
+
+	t.Run("workflow_invalid_input", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/workflows/order-processing/runs", workflowRunRequest{
+			Item:   "",
+			Amount: 0,
+		})
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d want 400", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("workflow_not_found_404", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/workflows/missing/runs", workflowRunRequest{
+			Item:   "x",
+			Amount: 10,
+		})
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d want 404", status)
+		}
+		if errResp.Error == "" {
+			t.Fatal("expected non-empty error message")
+		}
+	})
+
+	t.Run("guardrail_input_block", func(t *testing.T) {
+		status, _, errResp := postRaw(t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-guardrail-block",
+			Message:   "BLOCK_ME",
+		})
+		if status != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d want 422", status)
+		}
+		if !strings.Contains(errResp.Error, "guardrail") {
+			t.Fatalf("error = %q, want it to contain 'guardrail'", errResp.Error)
+		}
+	})
+
+	t.Run("guardrail_output_tag_on_run", func(t *testing.T) {
+		resp := postJSON[runResponse](t, client, baseURL+"/agents/demo-agent/runs", runRequest{
+			SessionID: "session-guardrail-tag",
+			Message:   "Eve",
+		})
+		if !strings.HasSuffix(resp.Output, " [guardrail:ok]") {
+			t.Fatalf("output = %q, want suffix ' [guardrail:ok]'", resp.Output)
+		}
+	})
+
+	t.Run("guardrail_stream_digit_redaction", func(t *testing.T) {
+		events := postSSE(t, client, baseURL+"/agents/demo-agent/stream", runRequest{
+			SessionID: "session-guardrail-stream",
+			Message:   "test 123",
+		})
+
+		for _, e := range events {
+			if e.name != "agent.delta" {
+				continue
+			}
+			var payload struct {
+				Delta string `json:"delta"`
+			}
+			if err := json.Unmarshal([]byte(e.data), &payload); err != nil {
+				t.Fatalf("unmarshal delta: %v", err)
+			}
+			for _, r := range payload.Delta {
+				if r >= '0' && r <= '9' {
+					t.Fatalf("delta %q contains unredacted digit", payload.Delta)
+				}
+			}
+		}
+
+		last := events[len(events)-1]
+		if last.name != "agent.completed" {
+			t.Fatalf("last event = %q want agent.completed", last.name)
+		}
+		var completed struct {
+			Output string `json:"output"`
+		}
+		if err := json.Unmarshal([]byte(last.data), &completed); err != nil {
+			t.Fatalf("unmarshal completed: %v", err)
+		}
+		if !strings.HasSuffix(completed.Output, " [guardrail:ok]") {
+			t.Fatalf("completed output = %q, want suffix ' [guardrail:ok]'", completed.Output)
+		}
+	})
 }
 
 func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
@@ -178,16 +423,16 @@ func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if first.Output != "hello, Ada" {
-		t.Fatalf("first = %q want %q", first.Output, "hello, Ada")
+	if first.Output != "hello, Ada [guardrail:ok]" {
+		t.Fatalf("first = %q want %q", first.Output, "hello, Ada [guardrail:ok]")
 	}
 
 	second := postJSON[runResponse](t, client, runURL1, runRequest{
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if second.Output != "welcome back, Ada" {
-		t.Fatalf("second = %q want %q", second.Output, "welcome back, Ada")
+	if second.Output != "welcome back, Ada [guardrail:ok]" {
+		t.Fatalf("second = %q want %q", second.Output, "welcome back, Ada [guardrail:ok]")
 	}
 
 	stopDemo(cmd1)
@@ -202,8 +447,8 @@ func TestDemoAppMemoryResetAfterRestart(t *testing.T) {
 		SessionID: "persist-test",
 		Message:   "Ada",
 	})
-	if afterRestart.Output != "hello, Ada" {
-		t.Fatalf("after restart = %q want %q (memory should be cleared)", afterRestart.Output, "hello, Ada")
+	if afterRestart.Output != "hello, Ada [guardrail:ok]" {
+		t.Fatalf("after restart = %q want %q (memory should be cleared)", afterRestart.Output, "hello, Ada [guardrail:ok]")
 	}
 }
 
@@ -232,16 +477,45 @@ type runRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
+type toolCallResponse struct {
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Input  map[string]any `json:"input,omitempty"`
+	Output string         `json:"output,omitempty"`
+}
+
 type runResponse struct {
-	RunID     string            `json:"run_id"`
-	AgentID   string            `json:"agent_id"`
-	SessionID string            `json:"session_id"`
-	Output    string            `json:"output"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	RunID     string             `json:"run_id"`
+	AgentID   string             `json:"agent_id"`
+	SessionID string             `json:"session_id"`
+	Output    string             `json:"output"`
+	ToolCalls []toolCallResponse `json:"tool_calls,omitempty"`
+	Metadata  map[string]string  `json:"metadata,omitempty"`
 }
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+type workflowDescriptor struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+type workflowsResponse struct {
+	Workflows []workflowDescriptor `json:"workflows"`
+}
+
+type workflowRunRequest struct {
+	Item   string  `json:"item"`
+	Amount float64 `json:"amount"`
+}
+
+type workflowRunResponse struct {
+	RunID        string         `json:"run_id"`
+	WorkflowName string         `json:"workflow_name"`
+	Status       string         `json:"status"`
+	Output       map[string]any `json:"output"`
 }
 
 type sseEvent struct {

@@ -9,6 +9,7 @@ coverage.html
 
 # Compiled binaries (output of go build without -o flag)
 /demo-app
+/gaal-lib
 
 # Editor directories
 .idea/

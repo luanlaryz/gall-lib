@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/luanlima/gaal-lib/pkg/agent"
 	"github.com/luanlima/gaal-lib/pkg/app"
+	"github.com/luanlima/gaal-lib/pkg/tool"
 	"github.com/luanlima/gaal-lib/pkg/types"
 )
+
+var numberPattern = regexp.MustCompile(`\d+(?:\.\d+)?`)
 
 type agentFactory struct {
 	agentName string
@@ -27,6 +32,7 @@ func (f agentFactory) Build(_ context.Context, defaults app.AgentDefaults) (*age
 	opts := []agent.Option{
 		agent.WithExecutionEngine(defaults.Engine),
 		agent.WithMaxSteps(defaults.MaxSteps),
+		agent.WithTools(demoTools()...),
 	}
 	if len(defaults.Metadata) > 0 {
 		opts = append(opts, agent.WithMetadata(defaults.Metadata))
@@ -63,20 +69,40 @@ func (f agentFactory) Build(_ context.Context, defaults app.AgentDefaults) (*age
 type demoModel struct{}
 
 func (demoModel) Generate(_ context.Context, req agent.ModelRequest) (agent.ModelResponse, error) {
+	if result, ok := lastToolResult(req.Messages); ok {
+		content := responseFromToolResult(req, result)
+		return agent.ModelResponse{
+			Message: types.Message{Role: types.RoleAssistant, Content: content},
+		}, nil
+	}
+
+	if calls := detectToolCalls(req); len(calls) > 0 {
+		return agent.ModelResponse{ToolCalls: calls}, nil
+	}
+
 	content := responseTextFromRequest(req)
 	return agent.ModelResponse{
-		Message: types.Message{
-			Role:    types.RoleAssistant,
-			Content: content,
-		},
+		Message: types.Message{Role: types.RoleAssistant, Content: content},
 	}, nil
 }
 
 func (demoModel) Stream(_ context.Context, req agent.ModelRequest) (agent.ModelStream, error) {
+	if result, ok := lastToolResult(req.Messages); ok {
+		content := responseFromToolResult(req, result)
+		return &demoModelStream{events: streamEventsFromContent(content)}, nil
+	}
+
+	if calls := detectToolCalls(req); len(calls) > 0 {
+		events := make([]agent.ModelEvent, len(calls))
+		for i, call := range calls {
+			c := call
+			events[i] = agent.ModelEvent{ToolCall: &c, Done: i == len(calls)-1}
+		}
+		return &demoModelStream{events: events}, nil
+	}
+
 	content := responseTextFromRequest(req)
-	return &demoModelStream{
-		events: streamEventsFromContent(content),
-	}, nil
+	return &demoModelStream{events: streamEventsFromContent(content)}, nil
 }
 
 type demoModelStream struct {
@@ -95,6 +121,62 @@ func (s *demoModelStream) Recv() (agent.ModelEvent, error) {
 
 func (*demoModelStream) Close() error { return nil }
 
+func detectToolCalls(req agent.ModelRequest) []agent.ModelToolCall {
+	msg := strings.ToLower(lastUserMessage(req.Messages))
+
+	if strings.Contains(msg, "use unknown_tool") {
+		return []agent.ModelToolCall{{ID: "tc-unknown", Name: "unknown_tool"}}
+	}
+
+	if strings.Contains(msg, "time") || strings.Contains(msg, "hora") {
+		return []agent.ModelToolCall{{ID: "tc-time", Name: "get_time"}}
+	}
+
+	if strings.Contains(msg, "sum") || strings.Contains(msg, "soma") {
+		a, b := extractTwoNumbers(msg)
+		return []agent.ModelToolCall{{
+			ID:    "tc-sum",
+			Name:  "calculate_sum",
+			Input: map[string]any{"a": a, "b": b},
+		}}
+	}
+
+	return nil
+}
+
+func extractTwoNumbers(text string) (float64, float64) {
+	matches := numberPattern.FindAllString(text, -1)
+	if len(matches) < 2 {
+		return 0, 0
+	}
+	a, _ := strconv.ParseFloat(matches[0], 64)
+	b, _ := strconv.ParseFloat(matches[1], 64)
+	return a, b
+}
+
+func lastToolResult(messages []types.Message) (types.Message, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == types.RoleTool {
+			return messages[i], true
+		}
+	}
+	return types.Message{}, false
+}
+
+func responseFromToolResult(req agent.ModelRequest, result types.Message) string {
+	toolName := result.Name
+	content := strings.TrimSpace(result.Content)
+
+	switch toolName {
+	case "get_time":
+		return fmt.Sprintf("the current time is %s", content)
+	case "calculate_sum":
+		return fmt.Sprintf("the result is %s", content)
+	default:
+		return fmt.Sprintf("tool %s returned: %s", toolName, content)
+	}
+}
+
 func responseTextFromRequest(req agent.ModelRequest) string {
 	message := lastUserMessage(req.Messages)
 	if len(req.Memory.Messages) > 0 {
@@ -102,6 +184,9 @@ func responseTextFromRequest(req agent.ModelRequest) string {
 	}
 	return fmt.Sprintf("hello, %s", message)
 }
+
+// keep tool import used at compile time
+var _ tool.Tool = getTimeTool{}
 
 func lastUserMessage(messages []types.Message) string {
 	for index := len(messages) - 1; index >= 0; index-- {
