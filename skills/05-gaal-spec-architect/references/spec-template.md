@@ -1,9 +1,11 @@
-# Template de spec gaal-lib
+# Templates de spec gaal-lib
 
-Use este formato como esqueleto minimo, adaptando a numeracao e o titulo ao modulo.
+Use estes formatos como esqueletos minimos, adaptando a numeracao e o titulo ao modulo.
+
+## Template de spec de construcao
 
 ```md
-# Spec NNN: <titulo do modulo>
+# Spec NNN: <titulo do modulo> - construcao
 
 ## 1. Objetivo
 
@@ -58,8 +60,64 @@ Ficam fora do escopo deste documento:
 3. <criterio verificavel 3>
 ```
 
+## Template de spec de diagnostico
+
+```md
+# Spec NNN: <titulo do modulo> - diagnostico
+
+## 1. Objetivo
+
+Este documento define como observar, depurar e confirmar o comportamento de <contrato/modulo/comportamento> em `gaal-lib`, com foco em:
+
+- <sinais de saude>
+- <sinais de regressao>
+- <confirmacao diagnostica>
+
+Ficam fora do escopo deste documento:
+
+- <investigacoes nao cobertas>
+- <ferramentas externas fora do runtime, se aplicavel>
+
+## 2. Contexto e encaixe arquitetural
+
+- Modulos afetados: `pkg/...`, `internal/...`, `test/...`, `examples/...`
+- Contratos relacionados: `Spec 0xx`, `Spec 0yy`
+- Dependencias operacionais: <logs | metrics | traces | health checks | consultas>
+
+## 3. Sinais observaveis e modos de falha
+
+1. <sinal saudavel 1>
+2. <modo de falha 1>
+3. <modo de falha 2>
+
+## 4. Fontes diagnosticas
+
+- Logs: <campos, eventos, correlacao>
+- Metricas: <nome, dimensao, interpretacao>
+- Traces: <spans, atributos, correlacao>
+- Health checks ou consultas: <comandos, endpoints, invariantes>
+
+## 5. Procedimento de troubleshooting
+
+1. <passo 1>
+2. <passo 2>
+3. <passo 3>
+
+## 6. Riscos e trade-offs
+
+- Risco: <...>
+- Trade-off: <...>
+
+## 7. Criterios de confirmacao diagnostica
+
+1. <criterio verificavel 1>
+2. <criterio verificavel 2>
+3. <criterio verificavel 3>
+```
+
 ## Regras de estilo
 - usar linguagem normativa e observavel
 - explicitar o que muda e o que nao muda
 - evitar palavras vagas sem criterio verificavel
 - manter rastreabilidade com specs relacionadas
+- tratar construcao e diagnostico como specs irmas da mesma trilha

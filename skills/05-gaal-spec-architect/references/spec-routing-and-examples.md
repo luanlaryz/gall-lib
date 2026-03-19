@@ -19,10 +19,12 @@
 - Afeta ordem de eventos, cancelamento, flush final ou tratamento de erro?
 - O contrato e do `pkg/agent` ou apenas runtime interno?
 - Quais criterios de aceitacao validam a melhoria?
+- Quais sinais, logs ou traces distinguem stream saudavel de stream regressivo?
 
 ### Direcao recomendada
 - Comecar por `030-agent`
-- Amendar spec existente se o contrato ja existir parcialmente
+- Amendar specs existentes se o contrato ja existir parcialmente
+- Exigir spec de construcao e spec de diagnostico antes de gerar prompt de execucao
 
 ## Exemplo 2: pedido vago sobre memory
 ### Pedido inicial
@@ -33,10 +35,12 @@
 - O store atual falha em `Load`, `Save` ou concorrencia?
 - A mudanca altera contrato publico de `Store`?
 - Quais cenarios de sucesso, ausencia de sessao e falha devem ser cobertos?
+- Como diagnosticar corrupcao, ausencia ou isolamento incorreto de memoria?
 
 ### Direcao recomendada
 - Comecar por `050-memory`
-- Amendar spec existente se continuar sendo o mesmo contrato de memoria
+- Amendar specs existentes se continuar sendo o mesmo contrato de memoria
+- Exigir sinais diagnosticos para confirmar isolamento, persistencia e falhas de store
 
 ## Exemplo 3: pedido vago sobre workflows
 ### Pedido inicial
@@ -47,15 +51,18 @@
 - A mudanca afeta `Builder`, `Workflow`, `State`, `StepResult` ou hooks?
 - O comportamento e novo dominio ou extensao do contrato atual?
 - Como validar por testes a nova flexibilidade?
+- Como diagnosticar loops incorretos, retries excessivos ou history inconsistente?
 
 ### Direcao recomendada
 - Comecar por `070-workflows`
-- Criar nova spec apenas se surgir um dominio separado do contrato atual
+- Criar nova trilha dual-spec apenas se surgir um dominio separado do contrato atual
+- Exigir spec de diagnostico para sinais de runtime, retries e consistencia de history
 
 ## Bundle de saida esperado
-Depois da spec fechada, entregue:
+Depois das specs fechadas, entregue:
 1. leitura arquitetural
-2. spec final
-3. prompt Cursor
-4. prompt Codex
-5. checklist de PR
+2. spec de construcao
+3. spec de diagnostico
+4. prompt Cursor
+5. prompt Codex
+6. checklist de PR
