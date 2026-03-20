@@ -64,6 +64,7 @@ Os status usados nesta matriz sao:
 | HTTP server abstraction | Adaptador para expor runtime por HTTP sem acoplar a um framework especifico. | Nao | P2 | `adapter/http` | Adiado | Medio | Nao faz parte do nucleo minimo; so deve entrar apos estabilizacao do runtime central. |
 | Serverless abstraction | Adaptador para empacotar runtime em ambientes serverless. | Nao | P2 | `adapter/serverless` | Parcial | Alto | O contrato local de cold start/invocacao curta e helpers publicos ja existem sem acoplamento a plataforma; adapters concretos de cloud continuam fora da v1. |
 | Triggers/extensibility | Pontos de extensao para acionar agentes ou workflows a partir de eventos externos. | Nao | P2 | `trigger` | Adiado | Alto | Na v1, hooks e APIs explicitas devem bastar; um subsistema de triggers fica para depois. |
+| Agents as tools | Coordenacao entre agents via adapter que expoe um agent como tool.Tool de outro agent. | Sim | P1 | `tool` | Parcial | Medio | Adapter `AgentTool` implementado com resolucao estatica e lazy, propagacao de session_id, metadata de rastreabilidade e testes; streaming do sub-agent e recursao profunda continuam fora do escopo v1. |
 | Graceful shutdown | Encerramento ordenado com flush de estado, hooks finais e cancelamento cooperativo. | Sim | P1 | `lifecycle` | Parcial | Medio | `Shutdown` cooperativo, probes de readiness/health e rollback de startup com servers long-lived agora existem; coordinacao com todos os runtimes internos ainda pode evoluir. |
 
 ## 4. Lacunas e riscos
